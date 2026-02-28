@@ -10,6 +10,7 @@ interface TerminalPaneProps {
   terminal: TerminalInstance
   onClose: () => void
   onRename: (name: string) => void
+  onFocus: () => void
   isFocused: boolean
 }
 
@@ -17,6 +18,7 @@ export function TerminalPane({
   terminal,
   onClose,
   onRename,
+  onFocus,
   isFocused
 }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -27,7 +29,12 @@ export function TerminalPane({
 
   // 初始化终端
   useEffect(() => {
-    if (!containerRef.current) return
+    console.log('[TerminalPane] useEffect called, terminal.id:', terminal.id)
+    const container = containerRef.current
+    if (!container) {
+      console.log('[TerminalPane] container is null!')
+      return
+    }
 
     // 创建 XTerm 实例
     const xterm = new XTerm({
@@ -72,11 +79,22 @@ export function TerminalPane({
     xterm.loadAddon(searchAddon)
 
     // 打开终端
-    xterm.open(containerRef.current)
-    fitAddon.fit()
+    xterm.open(container)
 
+    // 保存引用
     xtermRef.current = xterm
     fitAddonRef.current = fitAddon
+
+    // 延迟 fit，确保终端已完全渲染
+    requestAnimationFrame(() => {
+      try {
+        fitAddon.fit()
+      } catch (e) {
+        console.warn('Fit failed:', e)
+      }
+      // 自动聚焦终端
+      xterm.focus()
+    })
 
     // 创建 PTY 进程
     const { cols, rows } = xterm
@@ -101,9 +119,23 @@ export function TerminalPane({
 
     // 监听窗口大小变化
     const handleResize = () => {
-      fitAddon.fit()
+      try {
+        fitAddon.fit()
+      } catch (e) {
+        console.warn('Resize fit failed:', e)
+      }
     }
     window.addEventListener('resize', handleResize)
+
+    // 使用 ResizeObserver 监听容器大小变化（聚焦模式切换等）
+    const resizeObserver = new ResizeObserver(() => {
+      try {
+        fitAddon.fit()
+      } catch (e) {
+        console.warn('ResizeObserver fit failed:', e)
+      }
+    })
+    resizeObserver.observe(container)
 
     // 监听终端退出
     const unsubscribeExit = window.electron.terminal.onExit((id) => {
@@ -112,46 +144,61 @@ export function TerminalPane({
       }
     })
 
-    // 处理复制：Ctrl+Shift+C 或右键复制
+    // 处理复制粘贴
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+Shift+C 复制
-      if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+      // Ctrl+C：有选中文字则复制，否则发送中断信号
+      if (e.ctrlKey && !e.shiftKey && e.key === 'c') {
         const selection = xterm.getSelection()
         if (selection) {
           navigator.clipboard.writeText(selection)
+          e.preventDefault()
         }
-        e.preventDefault()
       }
-      // Ctrl+Shift+V 粘贴
-      if (e.ctrlKey && e.shiftKey && e.key === 'V') {
+      // Ctrl+V：粘贴
+      if (e.ctrlKey && !e.shiftKey && e.key === 'v') {
         navigator.clipboard.readText().then(text => {
-          xterm.write(text)
           window.electron.terminal.write(terminal.id, text)
         })
         e.preventDefault()
       }
     }
 
-    // 右键复制
+    // 右键菜单：复制/粘贴
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault()
       const selection = xterm.getSelection()
       if (selection) {
         navigator.clipboard.writeText(selection)
+      } else {
+        navigator.clipboard.readText().then(text => {
+          window.electron.terminal.write(terminal.id, text)
+        })
       }
     }
 
-    containerRef.current.addEventListener('keydown', handleKeyDown)
-    containerRef.current.addEventListener('contextmenu', handleContextMenu)
+    // 点击终端时聚焦
+    const handleClick = () => {
+      xterm.focus()
+      onFocus()
+    }
 
+    container.addEventListener('click', handleClick)
+    container.addEventListener('keydown', handleKeyDown)
+    container.addEventListener('contextmenu', handleContextMenu)
+
+    // 清理函数
     return () => {
       unsubscribe()
       unsubscribeExit()
       window.removeEventListener('resize', handleResize)
-      containerRef.current?.removeEventListener('keydown', handleKeyDown)
-      containerRef.current?.removeEventListener('contextmenu', handleContextMenu)
+      resizeObserver.disconnect()
+      container.removeEventListener('click', handleClick)
+      container.removeEventListener('keydown', handleKeyDown)
+      container.removeEventListener('contextmenu', handleContextMenu)
       window.electron.terminal.destroy(terminal.id)
       xterm.dispose()
+      xtermRef.current = null
+      fitAddonRef.current = null
     }
   }, [terminal.id, terminal.cwd])
 
@@ -159,8 +206,12 @@ export function TerminalPane({
   useEffect(() => {
     if (isFocused && fitAddonRef.current && xtermRef.current) {
       setTimeout(() => {
-        fitAddonRef.current?.fit()
-        xtermRef.current?.focus()
+        try {
+          fitAddonRef.current?.fit()
+          xtermRef.current?.focus()
+        } catch (e) {
+          console.warn('Focus fit failed:', e)
+        }
       }, 0)
     }
   }, [isFocused])
@@ -219,7 +270,7 @@ export function TerminalPane({
         </div>
       </div>
 
-      {/* 终端容器 - 添加 tabindex 使其可聚焦 */}
+      {/* 终端容器 */}
       <div
         className="terminal-container"
         ref={containerRef}

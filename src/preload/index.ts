@@ -12,8 +12,11 @@ const electronAPI = {
 
   // 终端操作
   terminal: {
-    create: (id: string, cols: number, rows: number, cwd?: string) =>
-      ipcRenderer.invoke('terminal:create', { id, cols, rows, cwd }),
+    create: (id: string, cols: number, rows: number, cwd?: string) => {
+      // 确保 cwd 是有效值
+      const safeCwd = cwd || ''
+      return ipcRenderer.invoke('terminal:create', { id, cols, rows, cwd: safeCwd })
+    },
 
     write: (id: string, data: string) =>
       ipcRenderer.send('terminal:write', { id, data }),

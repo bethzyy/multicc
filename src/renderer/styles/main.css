@@ -25,7 +25,6 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   overflow: hidden;
-  user-select: none;
 }
 
 #root {
@@ -110,6 +109,19 @@ body {
 
 .title-bar-btn.active {
   background-color: var(--accent-color);
+}
+
+/* 标题栏新建终端按钮 */
+.title-bar-btn.new-terminal-btn {
+  width: auto;
+  padding: 0 10px;
+  background-color: var(--accent-color);
+  color: white;
+  font-weight: 500;
+}
+
+.title-bar-btn.new-terminal-btn:hover {
+  background-color: var(--accent-hover);
 }
 
 /* 侧边栏 */
@@ -270,6 +282,40 @@ body {
   min-width: 0;
 }
 
+/* 聚焦模式下的布局 */
+.tile-layout.focus-mode-active {
+  display: block;
+  padding: 0;
+}
+
+/* 终端包装器 */
+.terminal-wrapper {
+  display: contents;
+}
+
+.tile-layout.focus-mode-active .terminal-wrapper {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+/* 聚焦模式下隐藏非焦点终端 */
+.tile-layout.focus-mode-active .terminal-wrapper.hidden {
+  display: none;
+}
+
+/* 聚焦模式下显示焦点终端 */
+.tile-layout.focus-mode-active .terminal-wrapper.focused-visible {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.tile-layout.focus-mode-active .terminal-wrapper.focused-visible .terminal-pane {
+  height: 100%;
+  border-radius: 0;
+}
+
 /* 终端面板 */
 .terminal-pane {
   display: flex;
@@ -348,14 +394,21 @@ body {
   overflow: hidden;
   min-height: 0;
   min-width: 0;
+  cursor: text;
+  user-select: text;
 }
 
 .terminal-container .xterm {
   height: 100%;
+  width: 100%;
 }
 
 .terminal-container .xterm-viewport {
   overflow-y: auto !important;
+}
+
+.terminal-container .xterm-screen {
+  cursor: text;
 }
 
 /* 空状态 */

@@ -13,6 +13,7 @@
     "rebuild": "electron-rebuild -f -w node-pty"
   },
   "dependencies": {
+    "@lydell/node-pty": "^1.2.0-beta.3",
     "electron": "^40.6.1",
     "electron-store": "^10.0.0",
     "react": "^19.0.0",

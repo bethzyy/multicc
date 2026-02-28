@@ -70,6 +70,7 @@ function registerIpcHandlers() {
 
   // 终端操作
   ipcMain.handle('terminal:create', (_, { id, cols, rows, cwd }) => {
+    console.log('[Main] terminal:create called:', { id, cols, rows, cwd })
     return ptyService.create(id, cols, rows, cwd)
   })
 

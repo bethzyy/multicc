@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { TerminalPane } from '../Terminal/TerminalPane'
 import { TerminalInstance } from '../../App'
 
@@ -8,6 +8,7 @@ interface TileLayoutProps {
   onCloseTerminal: (id: string) => void
   onRenameTerminal: (id: string, name: string) => void
   onFocusTerminal: (id: string) => void
+  focusMode: boolean
 }
 
 export function TileLayout({
@@ -15,7 +16,8 @@ export function TileLayout({
   focusedId,
   onCloseTerminal,
   onRenameTerminal,
-  onFocusTerminal
+  onFocusTerminal,
+  focusMode
 }: TileLayoutProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -41,17 +43,22 @@ export function TileLayout({
   return (
     <div
       ref={containerRef}
-      className="tile-layout"
-      style={getGridStyle()}
+      className={`tile-layout ${focusMode ? 'focus-mode-active' : ''}`}
+      style={focusMode ? {} : getGridStyle()}
     >
       {terminals.map(terminal => (
-        <TerminalPane
+        <div
           key={terminal.id}
-          terminal={terminal}
-          onClose={() => onCloseTerminal(terminal.id)}
-          onRename={(name) => onRenameTerminal(terminal.id, name)}
-          isFocused={terminal.id === focusedId}
-        />
+          className={`terminal-wrapper ${focusMode ? (terminal.id === focusedId ? 'focused-visible' : 'hidden') : ''}`}
+        >
+          <TerminalPane
+            terminal={terminal}
+            onClose={() => onCloseTerminal(terminal.id)}
+            onRename={(name) => onRenameTerminal(terminal.id, name)}
+            onFocus={() => onFocusTerminal(terminal.id)}
+            isFocused={terminal.id === focusedId}
+          />
+        </div>
       ))}
     </div>
   )

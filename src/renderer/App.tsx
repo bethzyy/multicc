@@ -1,6 +1,4 @@
 import { useState, useCallback, useEffect } from 'react'
-import { TerminalPane } from './components/Terminal/TerminalPane'
-import { Sidebar } from './components/Sidebar/Sidebar'
 import { TitleBar } from './components/TitleBar/TitleBar'
 import { TileLayout } from './components/Layout/TileLayout'
 import { v4 as uuidv4 } from 'uuid'
@@ -16,16 +14,17 @@ function App() {
   const [terminals, setTerminals] = useState<TerminalInstance[]>([])
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const [focusMode, setFocusMode] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   // 创建新终端
   const createTerminal = useCallback((cwd?: string) => {
+    console.log('[App] createTerminal called, cwd:', cwd)
     const id = uuidv4()
     const terminal: TerminalInstance = {
       id,
       name: `终端 ${terminals.length + 1}`,
       cwd: cwd || ''
     }
+    console.log('[App] new terminal:', terminal)
     setTerminals(prev => [...prev, terminal])
     setFocusedId(id)
     return id
@@ -61,11 +60,6 @@ function App() {
     setFocusMode(prev => !prev)
   }, [])
 
-  // 切换侧边栏
-  const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed(prev => !prev)
-  }, [])
-
   // 重命名终端
   const renameTerminal = useCallback((id: string, name: string) => {
     setTerminals(prev =>
@@ -87,43 +81,21 @@ function App() {
       <TitleBar
         focusMode={focusMode}
         onToggleFocusMode={toggleFocusMode}
-        onToggleSidebar={toggleSidebar}
-        sidebarCollapsed={sidebarCollapsed}
+        onCreateTerminal={createTerminal}
       />
 
       <div className="app-body">
-        {/* 侧边栏 */}
-        <Sidebar
-          terminals={terminals}
-          focusedId={focusedId}
-          collapsed={sidebarCollapsed}
-          onCreateTerminal={createTerminal}
-          onFocusTerminal={focusTerminal}
-          onCloseTerminal={closeTerminal}
-          onRenameTerminal={renameTerminal}
-        />
-
         {/* 主内容区 */}
         <main className={`main-content ${focusMode ? 'focus-mode' : ''}`}>
-          {focusMode && focusedTerminal ? (
-            // 聚焦模式：只显示当前终端
-            <TerminalPane
-              key={focusedTerminal.id}
-              terminal={focusedTerminal}
-              onClose={() => closeTerminal(focusedTerminal.id)}
-              onRename={(name) => renameTerminal(focusedTerminal.id, name)}
-              isFocused={true}
-            />
-          ) : (
-            // 平铺模式：显示所有终端
-            <TileLayout
-              terminals={terminals}
-              focusedId={focusedId}
-              onCloseTerminal={closeTerminal}
-              onRenameTerminal={renameTerminal}
-              onFocusTerminal={focusTerminal}
-            />
-          )}
+          {/* 平铺布局 - 始终渲染，通过CSS控制显示 */}
+          <TileLayout
+            terminals={terminals}
+            focusedId={focusedId}
+            onCloseTerminal={closeTerminal}
+            onRenameTerminal={renameTerminal}
+            onFocusTerminal={focusTerminal}
+            focusMode={focusMode}
+          />
 
           {/* 空状态 */}
           {terminals.length === 0 && (

@@ -1,8 +1,8 @@
-import { spawn, ChildProcess } from 'child_process'
+import * as pty from '@lydell/node-pty'
 import { BrowserWindow } from 'electron'
 
 interface PtyInstance {
-  process: ChildProcess
+  pty: pty.IPty
   id: string
   buffer: string
 }
@@ -17,92 +17,86 @@ export class PtyService {
 
   create(id: string, cols: number, rows: number, cwd?: string): boolean {
     try {
-      // 使用 cmd.exe（更简单可靠）
       const shell = process.env.COMSPEC || 'cmd.exe'
-      const workingDir = cwd || process.cwd()
+      // 确保 workingDir 是有效字符串
+      const workingDir = (cwd && cwd.length > 0) ? cwd : process.cwd()
 
-      console.log(`Creating PTY ${id}: ${shell} in ${workingDir}`)
+      console.log('[PTY] Creating terminal:', { id, shell, cwd: workingDir, cols, rows })
 
-      const childProcess = spawn(shell, [], {
+      // 使用 node-pty 创建真正的伪终端
+      // 注意：删除 CLAUDECODE 环境变量，允许在 multicc 终端中运行 Claude Code
+      const { CLAUDECODE, ...envWithoutClaudeCode } = process.env
+
+      const ptyProcess = pty.spawn(shell, [], {
+        name: 'xterm-256color',
+        cols: cols,
+        rows: rows,
         cwd: workingDir,
         env: {
-          ...process.env,
+          ...envWithoutClaudeCode,
           TERM: 'xterm-256color',
-          COLORTERM: 'truecolor',
-          COLUMNS: cols.toString(),
-          LINES: rows.toString()
-        },
-        stdio: ['pipe', 'pipe', 'pipe']
+          COLORTERM: 'truecolor'
+        }
       })
 
-      // 监听标准输出
-      childProcess.stdout?.on('data', (data: Buffer) => {
-        const str = data.toString('utf8')
+      console.log('[PTY] Process created, PID:', ptyProcess.pid)
+
+      // 监听输出
+      ptyProcess.onData((data: string) => {
+        console.log('[PTY] onData for', id, ':', data.length, 'bytes')
         const instance = this.instances.get(id)
         if (instance) {
-          instance.buffer += str
+          instance.buffer += data
           if (instance.buffer.length > 100000) {
             instance.buffer = instance.buffer.slice(-50000)
           }
         }
-        this.window.webContents.send('terminal:data', { id, data: str })
+        // 确保数据是字符串
+        this.window.webContents.send('terminal:data', { id, data: String(data) })
       })
 
-      // 监听标准错误
-      childProcess.stderr?.on('data', (data: Buffer) => {
-        const str = data.toString('utf8')
-        this.window.webContents.send('terminal:data', { id, data: str })
-      })
-
-      // 监听进程退出
-      childProcess.on('close', (code) => {
-        console.log(`PTY ${id} exited with code ${code}`)
-        this.window.webContents.send('terminal:exit', { id, exitCode: code || 0 })
+      // 监听退出
+      ptyProcess.onExit(({ exitCode }) => {
+        console.log('[PTY] Process exited:', id, 'code:', exitCode)
+        this.window.webContents.send('terminal:exit', { id, exitCode })
         this.instances.delete(id)
       })
 
-      childProcess.on('error', (err) => {
-        console.error('PTY process error:', err)
-        this.window.webContents.send('terminal:data', {
-          id,
-          data: `\x1b[31mError: ${err.message}\x1b[0m\r\n`
-        })
-      })
-
       this.instances.set(id, {
-        process: childProcess,
+        pty: ptyProcess,
         id,
         buffer: ''
       })
 
-      console.log(`PTY ${id} created successfully`)
+      console.log('[PTY] Total instances:', this.instances.size)
+
       return true
     } catch (error) {
-      console.error('Failed to create PTY:', error)
+      console.error('[PTY] Failed to create:', error)
       return false
     }
   }
 
   write(id: string, data: string): void {
     const instance = this.instances.get(id)
-    if (instance && instance.process.stdin) {
-      console.log(`PTY ${id} write: ${JSON.stringify(data)}`)
-      instance.process.stdin.write(data)
+    if (instance) {
+      instance.pty.write(data)
     } else {
-      console.log(`PTY ${id} not found or stdin not available`)
+      console.log('[PTY] write failed - instance not found:', id)
     }
   }
 
   resize(id: string, cols: number, rows: number): void {
-    // child_process 不支持动态调整大小
-    console.log(`PTY ${id} resize: ${cols}x${rows} (not supported)`)
+    const instance = this.instances.get(id)
+    if (instance) {
+      instance.pty.resize(cols, rows)
+    }
   }
 
   destroy(id: string): void {
     const instance = this.instances.get(id)
     if (instance) {
-      console.log(`Destroying PTY ${id}`)
-      instance.process.kill()
+      instance.pty.kill()
       this.instances.delete(id)
     }
   }

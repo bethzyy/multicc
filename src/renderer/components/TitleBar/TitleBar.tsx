@@ -3,17 +3,22 @@ import { useState, useEffect } from 'react'
 interface TitleBarProps {
   focusMode: boolean
   onToggleFocusMode: () => void
-  onToggleSidebar: () => void
-  sidebarCollapsed: boolean
+  onCreateTerminal?: () => void
 }
 
 export function TitleBar({
   focusMode,
   onToggleFocusMode,
-  onToggleSidebar,
-  sidebarCollapsed
+  onCreateTerminal
 }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false)
+
+  const handleCreateTerminal = () => {
+    console.log('[TitleBar] handleCreateTerminal clicked')
+    if (onCreateTerminal) {
+      onCreateTerminal()
+    }
+  }
 
   useEffect(() => {
     // 检查窗口是否最大化
@@ -39,14 +44,16 @@ export function TitleBar({
   return (
     <div className="title-bar">
       <div className="title-bar-left">
-        {/* 侧边栏切换 */}
-        <button
-          className="title-bar-btn sidebar-toggle"
-          onClick={onToggleSidebar}
-          title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
-        >
-          ☰
-        </button>
+        {/* 新建终端按钮 */}
+        {onCreateTerminal && (
+          <button
+            className="title-bar-btn new-terminal-btn"
+            onClick={handleCreateTerminal}
+            title="新建终端"
+          >
+            + 新建
+          </button>
+        )}
 
         {/* Logo */}
         <span className="title-bar-logo">MultiCC</span>

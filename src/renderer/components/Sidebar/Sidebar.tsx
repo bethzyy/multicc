@@ -51,16 +51,6 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      {/* 新建终端按钮 */}
-      <div className="sidebar-section">
-        <button
-          className="new-terminal-btn"
-          onClick={() => onCreateTerminal()}
-        >
-          + 新建终端
-        </button>
-      </div>
-
       {/* 终端列表 */}
       <div className="sidebar-section">
         <h3 className="sidebar-title">终端</h3>
