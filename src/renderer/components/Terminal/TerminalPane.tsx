@@ -66,8 +66,14 @@ export function TerminalPane({
         brightWhite: '#ffffff'
       },
       allowProposedApi: true,
-      allowTransparency: true
+      allowTransparency: true,
+      // 禁用默认的 Ctrl+C 复制行为，让我们自己处理
+      disableStdin: false
     })
+
+    // 配置右键菜单选项
+    xterm.options.rightClickSelectsWord = true
+    xterm.options.altClickMovesCursor = false
 
     // 加载插件
     const fitAddon = new FitAddon()
@@ -147,19 +153,34 @@ export function TerminalPane({
     // 处理复制粘贴
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ctrl+C：有选中文字则复制，否则发送中断信号
-      if (e.ctrlKey && !e.shiftKey && e.key === 'c') {
+      if (e.ctrlKey && !e.shiftKey && (e.key === 'c' || e.key === 'C')) {
         const selection = xterm.getSelection()
-        if (selection) {
-          navigator.clipboard.writeText(selection)
+        console.log('[Terminal] Ctrl+C pressed, selection:', selection)
+        if (selection && selection.length > 0) {
+          navigator.clipboard.writeText(selection).then(() => {
+            console.log('[Terminal] Copied to clipboard:', selection)
+            xterm.clearSelection()
+          }).catch(err => {
+            console.error('[Terminal] Copy failed:', err)
+          })
           e.preventDefault()
+          e.stopPropagation()
+          return
         }
+        // 没有选中文字，允许 Ctrl+C 作为中断信号
+        console.log('[Terminal] No selection, allowing Ctrl+C as interrupt')
       }
       // Ctrl+V：粘贴
-      if (e.ctrlKey && !e.shiftKey && e.key === 'v') {
+      if (e.ctrlKey && !e.shiftKey && (e.key === 'v' || e.key === 'V')) {
+        console.log('[Terminal] Ctrl+V pressed, pasting...')
         navigator.clipboard.readText().then(text => {
+          console.log('[Terminal] Pasting text:', text)
           window.electron.terminal.write(terminal.id, text)
+        }).catch(err => {
+          console.error('[Terminal] Paste failed:', err)
         })
         e.preventDefault()
+        e.stopPropagation()
       }
     }
 
@@ -183,7 +204,8 @@ export function TerminalPane({
     }
 
     container.addEventListener('click', handleClick)
-    container.addEventListener('keydown', handleKeyDown)
+    // 使用捕获阶段，确保在 XTerm 内部处理之前拦截 Ctrl+C
+    container.addEventListener('keydown', handleKeyDown, { capture: true })
     container.addEventListener('contextmenu', handleContextMenu)
 
     // 清理函数
@@ -193,7 +215,7 @@ export function TerminalPane({
       window.removeEventListener('resize', handleResize)
       resizeObserver.disconnect()
       container.removeEventListener('click', handleClick)
-      container.removeEventListener('keydown', handleKeyDown)
+      container.removeEventListener('keydown', handleKeyDown, { capture: true })
       container.removeEventListener('contextmenu', handleContextMenu)
       window.electron.terminal.destroy(terminal.id)
       xterm.dispose()
