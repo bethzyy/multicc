@@ -213,7 +213,7 @@ body {
 }
 
 .terminal-name {
-  flex: 1;
+  max-width: 120px;
   font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
@@ -363,11 +363,24 @@ body {
   border-bottom: 1px solid var(--border-color);
 }
 
+/* 终端面板标题中的名称样式 - 独立于侧边栏 */
+.terminal-header .terminal-name {
+  max-width: 120px;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .terminal-title {
   display: flex;
   align-items: center;
   font-size: 12px;
   color: var(--text-secondary);
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
 }
 
 .terminal-icon {
@@ -380,8 +393,10 @@ body {
 }
 
 .terminal-cwd {
+  flex-shrink: 0;
   color: var(--text-secondary);
   font-size: 11px;
+  min-width: 40px;
   max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -422,9 +437,17 @@ body {
   color: var(--text-primary);
 }
 
+/* 关闭按钮样式 - 使用 !important 强制覆盖 */
+.terminal-action-btn.close-btn {
+  color: #cccccc !important;
+  font-size: 18px !important;
+  line-height: 1;
+  opacity: 1 !important;
+}
+
 .terminal-action-btn.close-btn:hover {
-  background-color: var(--danger-color);
-  color: white;
+  background-color: var(--danger-color) !important;
+  color: white !important;
 }
 
 /* 终端容器 */

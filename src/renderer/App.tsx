@@ -24,7 +24,6 @@ function App() {
   const [showChatHistory, setShowChatHistory] = useState(false)
   const [showConfigBrowser, setShowConfigBrowser] = useState(false)
   const [showToolsBrowser, setShowToolsBrowser] = useState(false)
-  const [minimizedTerminals, setMinimizedTerminals] = useState<Set<string>>(new Set())
   const { theme, toggleTheme } = useTheme()
 
   // 创建新终端
@@ -73,24 +72,17 @@ function App() {
     setFocusMode(prev => !prev)
   }, [])
 
-  // 切换终端最小化状态
-  const toggleMinimize = useCallback((id: string) => {
-    setMinimizedTerminals(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
-      } else {
-        next.add(id)
-      }
-      return next
-    })
-  }, [])
-
-  // 最大化终端（进入聚焦模式并选中该终端）
-  const maximizeTerminal = useCallback((id: string) => {
-    setFocusedId(id)
-    setFocusMode(true)
-  }, [])
+  // 切换终端聚焦模式（toggle 行为）
+  const toggleFocusModeForTerminal = useCallback((id: string) => {
+    // 如果当前已在聚焦模式且聚焦的是这个终端，退出聚焦模式
+    if (focusMode && focusedId === id) {
+      setFocusMode(false)
+    } else {
+      // 否则进入聚焦模式并聚焦这个终端
+      setFocusedId(id)
+      setFocusMode(true)
+    }
+  }, [focusMode, focusedId])
 
   // 重命名终端
   const renameTerminal = useCallback((id: string, name: string) => {
@@ -241,9 +233,7 @@ function App() {
             onRenameTerminal={renameTerminal}
             onFocusTerminal={focusTerminal}
             focusMode={focusMode}
-            minimizedTerminals={minimizedTerminals}
-            onMinimizeTerminal={toggleMinimize}
-            onMaximizeTerminal={maximizeTerminal}
+            onToggleFocusModeForTerminal={toggleFocusModeForTerminal}
             theme={theme}
           />
 

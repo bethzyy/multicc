@@ -201,3 +201,60 @@ const { CLAUDECODE, ...envWithoutClaudeCode } = process.env
 
 ### 嵌套 Claude Code 检测
 问题：在 multicc 终端运行 Claude Code 报 "cannot be launched inside another session"。解决：在 `PtyService.create()` 中移除 `CLAUDECODE` 环境变量。
+
+### 终端标题栏路径在 claude 运行时保持不变（v4 修复）
+
+**问题描述**：启动 claude 后，当 claude 内部改变工作目录时，终端标题栏的路径会跟着变化，但用户期望路径保持为启动 claude 时的目录。
+
+**失败的修复尝试**：
+1. **v1**: 在 `processTerminalOutput` 中添加 `foregroundProcess` 检查 - 无效
+2. **v2**: 添加 `isValidCwdPath()` 验证 - 只修复了 OSC 解析路径的乱码问题
+3. **v3**: 在 `pollCwd` 中也添加 `isValidCwdPath()` 验证 - 路径仍然会变
+
+**根本原因分析**：
+```
+代码流程：
+1. detectCommandState() 依赖 OSC 133 序列检测命令开始/结束
+2. 当 commandStarted 时，设置 foregroundProcess = 'pending'
+3. 当 commandEnded/isPromptReady 时，设置 foregroundProcess = null
+4. pollCwd() 检查 foregroundProcess，非空则不更新路径
+
+问题：
+- cmd.exe 不支持 OSC 133 序列！
+- 所以 commandStarted 永远不会触发
+- foregroundProcess 始终为 null
+- pollCwd() 每 2 秒执行，发现新路径就更新
+- 导致 claude 改变目录时，标题栏路径跟着变
+```
+
+**v4 成功修复的关键**：
+
+1. **主动检测代替被动等待**：
+   - 旧方案：等待 OSC 133 序列来设置 `foregroundProcess`
+   - 新方案：在 `pollCwd` 中**主动调用** `detectForegroundProcess()` 检测前台进程
+   ```typescript
+   // pollCwd 中主动检测（不依赖 OSC 133）
+   const processInfo = detectForegroundProcess(instance.pty.pid)
+   if (processInfo) {
+     // 有前台进程，不更新路径
+     return
+   }
+   // 没有前台进程，允许更新路径
+   ```
+
+2. **修复进程检测逻辑**：
+   - 问题：`WindowsProcessDetector.ts` 中 `node.exe` 被放在 `shellNames` 中
+   - 结果：claude（基于 Node.js）被当作 shell 进程跳过
+   - 修复：从 `shellNames` 中移除 `node.exe`
+
+**经验教训**：
+
+1. **不要假设平台特性**：OSC 133 是 shell 集成特性，只有 zsh/bash（配合 shell-integration）才支持，cmd.exe 完全不支持。在 Windows 上必须使用主动检测方案。
+
+2. **追查根因而非打补丁**：v1-v3 都是在"如何阻止路径更新"上打补丁，但没有追问"为什么 foregroundProcess 永远是 null"。找到根因后，一行主动检测代码就解决了问题。
+
+3. **进程分类要准确**：`node.exe` 不是 shell，它可以是任何 Node.js 应用的运行时。把 `node.exe` 当作 shell 跳过会导致所有 Node.js CLI（包括 claude）都无法被检测。
+
+**相关文件**：
+- `src/main/services/pty.ts` - `pollCwd()` 方法
+- `src/main/services/terminal/WindowsProcessDetector.ts` - `detectForegroundProcess()` 函数

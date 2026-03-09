@@ -147,6 +147,8 @@ export function detectForegroundProcess(shellPid: number): ProcessInfo | null {
   const descendantPids = getDescendantPids(shellPid);
 
   // Known shell process names to skip
+  // Note: 'node.exe' is NOT in this list because claude and other Node.js CLIs
+  // should be detected as foreground processes
   const shellNames = new Set([
     'cmd.exe',
     'powershell.exe',
@@ -155,7 +157,6 @@ export function detectForegroundProcess(shellPid: number): ProcessInfo | null {
     'sh.exe',
     'zsh.exe',
     'fish.exe',
-    'node.exe', // Node.js itself is often a shell wrapper
   ]);
 
   for (const pid of descendantPids) {

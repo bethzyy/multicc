@@ -27,7 +27,9 @@
       "Bash(cp:*)",
       "Bash(git config:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "mcp__zai-mcp-server__analyze_image",
+      "mcp__zai-mcp-server__extract_text_from_screenshot"
     ]
   },
   "hooks": {

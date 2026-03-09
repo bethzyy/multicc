@@ -13,25 +13,33 @@ interface TerminalPaneProps {
   onRename: (name: string) => void
   onFocus: () => void
   isFocused: boolean
-  isMinimized?: boolean
-  onMinimize?: () => void
-  onMaximize?: () => void
+  isInFocusMode?: boolean
+  onToggleFocusMode?: () => void
   theme?: 'dark' | 'light'
 }
 
-// 格式化路径显示：显示最后两级目录
+// multicc 目录路径
+const MULTICC_DIR = 'C:/D/CAIE_tool/MyAIProduct/multicc'
+
+// 格式化路径显示：相对 multicc 目录
 function formatCwd(cwd: string | null): string {
   if (!cwd) return ''
 
-  // Windows 路径处理
-  const parts = cwd.replace(/\\/g, '/').split('/')
-  const filtered = parts.filter(p => p)
+  // 统一使用正斜杠
+  const normalizedCwd = cwd.replace(/\\/g, '/')
+  const normalizedMulticc = MULTICC_DIR.replace(/\\/g, '/')
 
-  if (filtered.length <= 2) {
-    return cwd
+  // 如果在 multicc 目录下，显示相对路径
+  if (normalizedCwd.startsWith(normalizedMulticc)) {
+    const relative = normalizedCwd.slice(normalizedMulticc.length)
+    if (relative === '' || relative === '/') return '.'
+    return '.' + relative  // 例如: ./src/renderer
   }
 
-  // 显示最后两级
+  // 不在 multicc 目录下，显示最后两级
+  const parts = normalizedCwd.split('/')
+  const filtered = parts.filter(p => p)
+  if (filtered.length <= 2) return cwd
   return '.../' + filtered.slice(-2).join('/')
 }
 
@@ -41,9 +49,8 @@ export function TerminalPane({
   onRename,
   onFocus,
   isFocused,
-  isMinimized = false,
-  onMinimize,
-  onMaximize,
+  isInFocusMode = false,
+  onToggleFocusMode,
   theme = 'dark'
 }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -272,7 +279,7 @@ export function TerminalPane({
   }
 
   return (
-    <div className={`terminal-pane ${isFocused ? 'focused' : ''} ${isMinimized ? 'minimized' : ''}`}>
+    <div className={`terminal-pane ${isFocused ? 'focused' : ''}`}>
       {/* 终端标题栏 */}
       <div className="terminal-header">
         <div className="terminal-title" onDoubleClick={handleDoubleClick}>
@@ -295,38 +302,28 @@ export function TerminalPane({
           ) : (
             <>
               <span className="terminal-icon">⬡</span>
-              <span className="terminal-name">{terminal.name}</span>
-              {currentCwd && (
+              {currentCwd ? (
                 <>
-                  <span className="terminal-separator">·</span>
                   <span className="terminal-cwd" title={currentCwd}>
                     {formatCwd(currentCwd)}
                   </span>
+                  <span className="terminal-separator">·</span>
                 </>
-              )}
+              ) : null}
+              <span className="terminal-name">{terminal.name}</span>
             </>
           )}
         </div>
 
         <div className="terminal-actions">
-          {/* 最小化按钮 */}
-          {onMinimize && (
+          {/* 聚焦按钮 */}
+          {onToggleFocusMode && (
             <button
-              className="terminal-action-btn minimize-btn"
-              onClick={onMinimize}
-              title={isMinimized ? '恢复' : '最小化'}
+              className={`terminal-action-btn focus-btn ${isInFocusMode ? 'active' : ''}`}
+              onClick={onToggleFocusMode}
+              title={isInFocusMode ? '退出聚焦模式' : '聚焦模式'}
             >
-              {isMinimized ? '◱' : '⊟'}
-            </button>
-          )}
-          {/* 最大化按钮 */}
-          {onMaximize && (
-            <button
-              className="terminal-action-btn maximize-btn"
-              onClick={onMaximize}
-              title="最大化"
-            >
-              ⊞
+              {isInFocusMode ? '⊞' : '◎'}
             </button>
           )}
           {/* 关闭按钮 */}
@@ -335,19 +332,17 @@ export function TerminalPane({
             onClick={onClose}
             title="关闭终端"
           >
-            ✕
+            ×
           </button>
         </div>
       </div>
 
-      {/* 终端容器 - 最小化时隐藏 */}
-      {!isMinimized && (
-        <div
-          className="terminal-container"
-          ref={containerRef}
-          tabIndex={0}
-        />
-      )}
+      {/* 终端容器 */}
+      <div
+        className="terminal-container"
+        ref={containerRef}
+        tabIndex={0}
+      />
     </div>
   )
 }
