@@ -25,6 +25,6 @@ if not exist "node_modules" (
     )
 )
 
-:: 启动开发模式（隐藏 cmd 窗口）
+:: 启动开发模式（使用 VBScript 隐藏窗口）
 echo [信息] 启动 MultiCC...
-start "" npm run dev
+cscript //nologo "%~dp0launch.vbs"

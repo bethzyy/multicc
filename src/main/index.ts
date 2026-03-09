@@ -138,7 +138,23 @@ app.on('window-all-closed', () => {
   }
 })
 
-// 清理资源
-app.on('before-quit', () => {
-  ptyService?.destroyAll()
+// 清理资源（带超时保护）
+app.on('before-quit', (event) => {
+  if (!ptyService) return
+
+  // 先阻止默认行为，异步清理
+  event.preventDefault()
+
+  // 设置 3 秒超时保护
+  const forceQuitTimer = setTimeout(() => {
+    console.warn('[App] Force quit after timeout')
+    app.exit(0)
+  }, 3000)
+
+  // 销毁所有终端
+  ptyService.destroyAll()
+
+  // 清除超时定时器并退出
+  clearTimeout(forceQuitTimer)
+  app.exit(0)
 })

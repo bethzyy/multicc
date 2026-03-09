@@ -1,13 +1,16 @@
 import * as pty from '@lydell/node-pty'
 import { BrowserWindow } from 'electron'
-import { execSync } from 'child_process'
+import { exec, execSync } from 'child_process'
+import { promisify } from 'util'
 import {
   extractLatestCwd,
   detectWaitingForInput,
   detectCommandState,
   StateChangeDebouncer
 } from './terminal/OscParser'
-import { detectForegroundProcess } from './terminal/WindowsProcessDetector'
+import { detectForegroundProcess, detectForegroundProcessAsync } from './terminal/WindowsProcessDetector'
+
+const execAsync = promisify(exec)
 
 interface PtyInstance {
   pty: pty.IPty
@@ -24,6 +27,7 @@ export class PtyService {
   private instances: Map<string, PtyInstance> = new Map()
   private window: BrowserWindow
   private stateDebouncers: Map<string, StateChangeDebouncer> = new Map()
+  private isShuttingDown = false  // 关闭标记，防止关闭时执行阻塞操作
 
   constructor(window: BrowserWindow) {
     this.window = window
@@ -148,7 +152,7 @@ export class PtyService {
       this.window.webContents.send('terminal:state', { id, state: 'busy' })
 
       // Detect foreground process (will update the process name)
-      this.detectForegroundProcessAsync(id, instance)
+      this.detectForegroundProcessAsyncHandler(id, instance)
     }
     if (cmdState.commandEnded || cmdState.isPromptReady) {
       instance.state = 'running'
@@ -160,8 +164,12 @@ export class PtyService {
 
   /**
    * Detect foreground process asynchronously
+   * v2: 使用异步检测避免阻塞主线程
    */
-  private async detectForegroundProcessAsync(id: string, instance: PtyInstance): Promise<void> {
+  private async detectForegroundProcessAsyncHandler(id: string, instance: PtyInstance): Promise<void> {
+    // 关闭时跳过检测
+    if (this.isShuttingDown) return
+
     try {
       const ptyProcess = instance.pty
       if (!ptyProcess.pid) return
@@ -169,7 +177,10 @@ export class PtyService {
       // Wait a moment for the process to start
       await new Promise(resolve => setTimeout(resolve, 100))
 
-      const processInfo = detectForegroundProcess(ptyProcess.pid)
+      // 再次检查关闭状态
+      if (this.isShuttingDown) return
+
+      const processInfo = await detectForegroundProcessAsync(ptyProcess.pid)
       if (processInfo) {
         instance.foregroundProcess = processInfo.name
         instance.foregroundProcessPid = processInfo.pid  // 缓存 PID
@@ -198,15 +209,23 @@ export class PtyService {
    * - 如果已检测到前台进程，缓存结果，后续 poll 直接使用缓存
    * - 只用轻量级 tasklist 检查进程是否还在运行
    * - 进程结束后才重新进行完整检测
+   *
+   * v6 异步优化：使用异步检测避免阻塞主线程
+   * - pollCwd 改为异步方法
+   * - 使用 detectForegroundProcessAsync 替代同步版本
+   * - 使用 isProcessRunningAsync 替代同步版本
    */
-  private pollCwd(id: string): void {
+  private async pollCwd(id: string): Promise<void> {
+    // 关闭时跳过轮询，避免阻塞
+    if (this.isShuttingDown) return
+
     const instance = this.instances.get(id)
     if (!instance || !instance.pty.pid) return
 
-    // 如果已经有前台进程在运行，先检查进程是否还存在（轻量级检查）
+    // 如果已经有前台进程在运行，先检查进程是否还存在（轻量级异步检查）
     if (instance.foregroundProcess && instance.foregroundProcess !== 'pending') {
       // 轻量级检查：进程是否还在运行
-      const stillRunning = this.isProcessRunning(instance.foregroundProcessPid)
+      const stillRunning = await this.isProcessRunningAsync(instance.foregroundProcessPid)
       if (stillRunning) {
         // 进程还在运行，不需要重新检测，直接返回
         return
@@ -217,8 +236,8 @@ export class PtyService {
       instance.foregroundProcessPid = null
     }
 
-    // 没有前台进程或进程已结束，执行检测
-    const processInfo = detectForegroundProcess(instance.pty.pid)
+    // 没有前台进程或进程已结束，执行异步检测
+    const processInfo = await detectForegroundProcessAsync(instance.pty.pid)
 
     if (processInfo) {
       // 缓存进程信息
@@ -244,8 +263,26 @@ export class PtyService {
   }
 
   /**
-   * 轻量级进程存在性检查
-   * 使用 tasklist 命令，比 PowerShell 快得多
+   * 异步版本：轻量级进程存在性检查
+   * 使用 tasklist 命令，不阻塞主线程
+   */
+  private async isProcessRunningAsync(pid: number | null): Promise<boolean> {
+    if (!pid) return false
+    try {
+      const { stdout } = await execAsync(`tasklist /fi "PID eq ${pid}" /nh`, {
+        timeout: 1000,
+        windowsHide: true
+      })
+      // 如果进程不存在，输出会是 "INFO: No tasks are running..."
+      return !stdout.includes('No tasks are running')
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * 同步版本：轻量级进程存在性检查（保留向后兼容）
+   * @deprecated 使用 isProcessRunningAsync 替代
    */
   private isProcessRunning(pid: number | null): boolean {
     if (!pid) return false
@@ -254,7 +291,6 @@ export class PtyService {
         encoding: 'utf-8',
         timeout: 1000
       })
-      // 如果进程不存在，输出会是 "INFO: No tasks are running..."
       return !result.includes('No tasks are running')
     } catch {
       return false
@@ -387,9 +423,23 @@ export class PtyService {
   }
 
   destroyAll(): void {
-    for (const [id] of this.instances) {
-      this.destroy(id)
+    this.isShuttingDown = true
+
+    // 先清除所有定时器（防止关闭时执行阻塞的 execSync）
+    const instances = Array.from(this.instances.values())
+    for (const instance of instances) {
+      if (instance.cwdPollTimer) {
+        clearInterval(instance.cwdPollTimer)
+      }
     }
+
+    // 再销毁所有 PTY 进程
+    for (const instance of instances) {
+      instance.pty.kill()
+    }
+
+    this.instances.clear()
+    console.log('[PTY] All terminals destroyed')
   }
 
   getBuffer(id: string): string {

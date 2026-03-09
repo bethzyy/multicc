@@ -257,6 +257,16 @@ export function TerminalPane({
     }
   }, [isFocused])
 
+  // 聚焦时滚动到底部
+  useEffect(() => {
+    if (isFocused && xtermRef.current) {
+      // 延迟执行，确保终端已完成渲染
+      requestAnimationFrame(() => {
+        xtermRef.current?.scrollToBottom()
+      })
+    }
+  }, [isFocused])
+
   // 主题变化时更新 XTerm 主题
   useEffect(() => {
     if (xtermRef.current) {
