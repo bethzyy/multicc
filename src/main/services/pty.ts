@@ -1,6 +1,7 @@
 import * as pty from '@lydell/node-pty'
 import { BrowserWindow } from 'electron'
 import { exec, execSync } from 'child_process'
+import * as fs from 'fs'
 import { promisify } from 'util'
 import {
   extractLatestCwd,
@@ -368,6 +369,7 @@ export class PtyService {
   /**
    * 验证 CWD 路径是否有效
    * 过滤掉包含 ANSI 转义序列或其他无效字符的路径
+   * v2: 增加路径存在性检查，拒绝截断或错误的路径
    */
   private isValidCwdPath(path: string): boolean {
     // 检查是否包含 ANSI 转义序列
@@ -391,7 +393,12 @@ export class PtyService {
       return false
     }
 
-    return true
+    // 检查路径是否真实存在（防止截断或错误的路径）
+    try {
+      return fs.existsSync(path)
+    } catch {
+      return false
+    }
   }
 
   write(id: string, data: string): void {
