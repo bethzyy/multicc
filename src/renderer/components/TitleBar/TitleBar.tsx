@@ -10,6 +10,8 @@ interface TitleBarProps {
   showConfigBrowser?: boolean
   onToggleToolsBrowser?: () => void
   showToolsBrowser?: boolean
+  theme?: 'dark' | 'light'
+  onToggleTheme?: () => void
 }
 
 export function TitleBar({
@@ -21,7 +23,9 @@ export function TitleBar({
   onToggleConfigBrowser,
   showConfigBrowser,
   onToggleToolsBrowser,
-  showToolsBrowser
+  showToolsBrowser,
+  theme = 'dark',
+  onToggleTheme
 }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false)
 
@@ -56,7 +60,10 @@ export function TitleBar({
   return (
     <div className="title-bar">
       <div className="title-bar-left">
-        {/* 新建终端按钮 */}
+        {/* Logo */}
+        <span className="title-bar-logo">MultiCC</span>
+
+        {/* 新建终端按钮 - 移到 Logo 右侧 */}
         {onCreateTerminal && (
           <button
             className="title-bar-btn new-terminal-btn"
@@ -66,9 +73,6 @@ export function TitleBar({
             + 新建
           </button>
         )}
-
-        {/* Logo */}
-        <span className="title-bar-logo">MultiCC</span>
       </div>
 
       <div className="title-bar-center">
@@ -117,6 +121,17 @@ export function TitleBar({
         >
           {focusMode ? '⊞' : '◎'}
         </button>
+
+        {/* 主题切换按钮 */}
+        {onToggleTheme && (
+          <button
+            className="title-bar-btn theme-toggle-btn"
+            onClick={onToggleTheme}
+            title={theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+        )}
 
         {/* 窗口控制按钮 */}
         <button className="title-bar-btn minimize" onClick={handleMinimize}>

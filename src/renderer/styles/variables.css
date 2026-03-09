@@ -72,6 +72,42 @@
   --z-toast: 400;
 }
 
+/* === Light Theme === */
+:root[data-theme="light"] {
+  /* Backgrounds */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f3f3f3;
+  --bg-tertiary: #e8e8e8;
+  --bg-hover: #d4d4d4;
+  --bg-selected: #cce5ff;
+  --bg-input: #ffffff;
+
+  /* Borders */
+  --border-color: #d4d4d4;
+  --border-focus: #0078d4;
+
+  /* Text */
+  --text-primary: #333333;
+  --text-secondary: #666666;
+  --text-muted: #999999;
+  --text-link: #0066cc;
+
+  /* Accent */
+  --accent-color: #0078d4;
+  --accent-hover: #106ebe;
+
+  /* Status Colors */
+  --success-color: #107c10;
+  --warning-color: #c19c00;
+  --error-color: #d32f2f;
+  --info-color: #0078d4;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.2);
+}
+
 /* === Shared Panel Styles === */
 .panel {
   background: var(--bg-primary);

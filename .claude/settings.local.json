@@ -25,7 +25,9 @@
       "Bash(npm run:*)",
       "Bash(npm:*)",
       "Bash(cp:*)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   },
   "hooks": {

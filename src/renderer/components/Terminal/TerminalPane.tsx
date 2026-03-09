@@ -5,6 +5,7 @@ import { WebLinksAddon } from 'xterm-addon-web-links'
 import { SearchAddon } from 'xterm-addon-search'
 import 'xterm/css/xterm.css'
 import { TerminalInstance } from '../../App'
+import { getXTermTheme } from '../../hooks/useTheme'
 
 interface TerminalPaneProps {
   terminal: TerminalInstance
@@ -12,6 +13,26 @@ interface TerminalPaneProps {
   onRename: (name: string) => void
   onFocus: () => void
   isFocused: boolean
+  isMinimized?: boolean
+  onMinimize?: () => void
+  onMaximize?: () => void
+  theme?: 'dark' | 'light'
+}
+
+// 格式化路径显示：显示最后两级目录
+function formatCwd(cwd: string | null): string {
+  if (!cwd) return ''
+
+  // Windows 路径处理
+  const parts = cwd.replace(/\\/g, '/').split('/')
+  const filtered = parts.filter(p => p)
+
+  if (filtered.length <= 2) {
+    return cwd
+  }
+
+  // 显示最后两级
+  return '.../' + filtered.slice(-2).join('/')
 }
 
 export function TerminalPane({
@@ -19,13 +40,18 @@ export function TerminalPane({
   onClose,
   onRename,
   onFocus,
-  isFocused
+  isFocused,
+  isMinimized = false,
+  onMinimize,
+  onMaximize,
+  theme = 'dark'
 }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [editName, setEditName] = useState(terminal.name)
+  const [currentCwd, setCurrentCwd] = useState<string | null>(terminal.cwd || null)
 
   // 初始化终端
   useEffect(() => {
@@ -42,29 +68,7 @@ export function TerminalPane({
       cursorStyle: 'block',
       fontSize: 14,
       fontFamily: 'Consolas, "Courier New", monospace',
-      theme: {
-        background: '#1e1e1e',
-        foreground: '#d4d4d4',
-        cursor: '#ffffff',
-        cursorAccent: '#1e1e1e',
-        selection: 'rgba(255, 255, 255, 0.3)',
-        black: '#000000',
-        red: '#cd3131',
-        green: '#0dbc79',
-        yellow: '#e5e510',
-        blue: '#2472c8',
-        magenta: '#bc3fbc',
-        cyan: '#11a8cd',
-        white: '#e5e5e5',
-        brightBlack: '#666666',
-        brightRed: '#f14c4c',
-        brightGreen: '#23d18b',
-        brightYellow: '#f5f543',
-        brightBlue: '#3b8eea',
-        brightMagenta: '#d670d6',
-        brightCyan: '#29b8db',
-        brightWhite: '#ffffff'
-      },
+      theme: getXTermTheme(theme),
       allowProposedApi: true,
       allowTransparency: true,
       // 禁用默认的 Ctrl+C 复制行为，让我们自己处理
@@ -150,6 +154,13 @@ export function TerminalPane({
       }
     })
 
+    // 监听终端路径变化
+    const unsubscribeCwd = window.electron.terminal.onCwd((id, cwd) => {
+      if (id === terminal.id) {
+        setCurrentCwd(cwd)
+      }
+    })
+
     // 处理复制粘贴
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ctrl+C：有选中文字则复制，否则发送中断信号
@@ -212,6 +223,7 @@ export function TerminalPane({
     return () => {
       unsubscribe()
       unsubscribeExit()
+      unsubscribeCwd()
       window.removeEventListener('resize', handleResize)
       resizeObserver.disconnect()
       container.removeEventListener('click', handleClick)
@@ -238,6 +250,13 @@ export function TerminalPane({
     }
   }, [isFocused])
 
+  // 主题变化时更新 XTerm 主题
+  useEffect(() => {
+    if (xtermRef.current) {
+      xtermRef.current.options.theme = getXTermTheme(theme)
+    }
+  }, [theme])
+
   // 处理重命名
   const handleRename = () => {
     if (editName.trim() && editName !== terminal.name) {
@@ -253,7 +272,7 @@ export function TerminalPane({
   }
 
   return (
-    <div className={`terminal-pane ${isFocused ? 'focused' : ''}`}>
+    <div className={`terminal-pane ${isFocused ? 'focused' : ''} ${isMinimized ? 'minimized' : ''}`}>
       {/* 终端标题栏 */}
       <div className="terminal-header">
         <div className="terminal-title" onDoubleClick={handleDoubleClick}>
@@ -277,13 +296,42 @@ export function TerminalPane({
             <>
               <span className="terminal-icon">⬡</span>
               <span className="terminal-name">{terminal.name}</span>
+              {currentCwd && (
+                <>
+                  <span className="terminal-separator">·</span>
+                  <span className="terminal-cwd" title={currentCwd}>
+                    {formatCwd(currentCwd)}
+                  </span>
+                </>
+              )}
             </>
           )}
         </div>
 
         <div className="terminal-actions">
+          {/* 最小化按钮 */}
+          {onMinimize && (
+            <button
+              className="terminal-action-btn minimize-btn"
+              onClick={onMinimize}
+              title={isMinimized ? '恢复' : '最小化'}
+            >
+              {isMinimized ? '◱' : '⊟'}
+            </button>
+          )}
+          {/* 最大化按钮 */}
+          {onMaximize && (
+            <button
+              className="terminal-action-btn maximize-btn"
+              onClick={onMaximize}
+              title="最大化"
+            >
+              ⊞
+            </button>
+          )}
+          {/* 关闭按钮 */}
           <button
-            className="terminal-action-btn"
+            className="terminal-action-btn close-btn"
             onClick={onClose}
             title="关闭终端"
           >
@@ -292,12 +340,14 @@ export function TerminalPane({
         </div>
       </div>
 
-      {/* 终端容器 */}
-      <div
-        className="terminal-container"
-        ref={containerRef}
-        tabIndex={0}
-      />
+      {/* 终端容器 - 最小化时隐藏 */}
+      {!isMinimized && (
+        <div
+          className="terminal-container"
+          ref={containerRef}
+          tabIndex={0}
+        />
+      )}
     </div>
   )
 }

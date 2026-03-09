@@ -5,6 +5,7 @@ import { ChatHistoryPanel } from './components/chat'
 import { ConfigBrowser } from './components/config'
 import { ToolsBrowser } from './components/tools'
 import { UpdateNotification } from './components/update/UpdateNotification'
+import { useTheme, type Theme } from './hooks/useTheme'
 import { v4 as uuidv4 } from 'uuid'
 import type { ChatSource } from '@shared/types/chat.types'
 import type { CustomCommand } from '@shared/types/tools.types'
@@ -23,6 +24,8 @@ function App() {
   const [showChatHistory, setShowChatHistory] = useState(false)
   const [showConfigBrowser, setShowConfigBrowser] = useState(false)
   const [showToolsBrowser, setShowToolsBrowser] = useState(false)
+  const [minimizedTerminals, setMinimizedTerminals] = useState<Set<string>>(new Set())
+  const { theme, toggleTheme } = useTheme()
 
   // 创建新终端
   const createTerminal = useCallback((cwd?: string) => {
@@ -68,6 +71,25 @@ function App() {
   // 切换聚焦模式
   const toggleFocusMode = useCallback(() => {
     setFocusMode(prev => !prev)
+  }, [])
+
+  // 切换终端最小化状态
+  const toggleMinimize = useCallback((id: string) => {
+    setMinimizedTerminals(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }, [])
+
+  // 最大化终端（进入聚焦模式并选中该终端）
+  const maximizeTerminal = useCallback((id: string) => {
+    setFocusedId(id)
+    setFocusMode(true)
   }, [])
 
   // 重命名终端
@@ -178,6 +200,8 @@ function App() {
         showConfigBrowser={showConfigBrowser}
         onToggleToolsBrowser={() => setShowToolsBrowser(prev => !prev)}
         showToolsBrowser={showToolsBrowser}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
       {/* Chat History Panel Overlay */}
@@ -217,6 +241,10 @@ function App() {
             onRenameTerminal={renameTerminal}
             onFocusTerminal={focusTerminal}
             focusMode={focusMode}
+            minimizedTerminals={minimizedTerminals}
+            onMinimizeTerminal={toggleMinimize}
+            onMaximizeTerminal={maximizeTerminal}
+            theme={theme}
           />
 
           {/* 空状态 */}

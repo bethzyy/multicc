@@ -25,6 +25,6 @@ if not exist "node_modules" (
     )
 )
 
-:: 启动开发模式
+:: 启动开发模式（隐藏 cmd 窗口）
 echo [信息] 启动 MultiCC...
-npm run dev
+start "" npm run dev

@@ -52,6 +52,12 @@ const electronAPI = {
       const handler = (_: unknown, { id, exitCode }: { id: string; exitCode: number }) => callback(id, exitCode)
       ipcRenderer.on('terminal:exit', handler)
       return () => ipcRenderer.removeListener('terminal:exit', handler)
+    },
+
+    onCwd: (callback: (id: string, cwd: string) => void) => {
+      const handler = (_: unknown, { id, cwd }: { id: string; cwd: string }) => callback(id, cwd)
+      ipcRenderer.on('terminal:cwd', handler)
+      return () => ipcRenderer.removeListener('terminal:cwd', handler)
     }
   },
 

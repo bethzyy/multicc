@@ -9,6 +9,10 @@ interface TileLayoutProps {
   onRenameTerminal: (id: string, name: string) => void
   onFocusTerminal: (id: string) => void
   focusMode: boolean
+  minimizedTerminals: Set<string>
+  onMinimizeTerminal: (id: string) => void
+  onMaximizeTerminal: (id: string) => void
+  theme: 'dark' | 'light'
 }
 
 export function TileLayout({
@@ -17,7 +21,11 @@ export function TileLayout({
   onCloseTerminal,
   onRenameTerminal,
   onFocusTerminal,
-  focusMode
+  focusMode,
+  minimizedTerminals,
+  onMinimizeTerminal,
+  onMaximizeTerminal,
+  theme
 }: TileLayoutProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -57,6 +65,10 @@ export function TileLayout({
             onRename={(name) => onRenameTerminal(terminal.id, name)}
             onFocus={() => onFocusTerminal(terminal.id)}
             isFocused={terminal.id === focusedId}
+            isMinimized={minimizedTerminals.has(terminal.id)}
+            onMinimize={() => onMinimizeTerminal(terminal.id)}
+            onMaximize={() => onMaximizeTerminal(terminal.id)}
+            theme={theme}
           />
         </div>
       ))}

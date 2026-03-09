@@ -135,6 +135,11 @@ body {
   background-color: var(--accent-hover);
 }
 
+/* 主题切换按钮 */
+.title-bar-btn.theme-toggle-btn {
+  font-size: 14px;
+}
+
 /* 侧边栏 */
 .sidebar {
   width: 200px;
@@ -343,6 +348,11 @@ body {
   border-color: var(--accent-color);
 }
 
+.terminal-pane.minimized {
+  height: 28px;
+  min-height: 28px;
+}
+
 .terminal-header {
   height: 28px;
   background-color: var(--bg-secondary);
@@ -362,6 +372,20 @@ body {
 
 .terminal-icon {
   margin-right: 6px;
+}
+
+.terminal-separator {
+  margin: 0 6px;
+  color: var(--text-secondary);
+}
+
+.terminal-cwd {
+  color: var(--text-secondary);
+  font-size: 11px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rename-input {
@@ -394,6 +418,11 @@ body {
 }
 
 .terminal-action-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.terminal-action-btn.close-btn:hover {
   background-color: var(--danger-color);
   color: white;
 }
