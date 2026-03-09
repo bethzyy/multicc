@@ -1,0 +1,76 @@
+/**
+ * Terminal State Machine
+ *
+ * Simple state machine for terminal lifecycle management.
+ * Zero dependencies, ~65 lines of code.
+ */
+
+type TerminalState =
+  | 'Created'
+  | 'Starting'
+  | 'Running'
+  | 'Busy'
+  | 'WaitingInput'
+  | 'Stopping'
+  | 'Stopped'
+  | 'Disconnected'
+  | 'Failed'
+  | 'Removed';
+
+type TerminalEvent =
+  | 'SPAWN'
+  | 'SPAWN_SUCCESS'
+  | 'SPAWN_FAILURE'
+  | 'PROCESS_START'
+  | 'PROCESS_DONE'
+  | 'WAIT_INPUT'
+  | 'USER_INPUT'
+  | 'AUTO_RESUME'
+  | 'CLOSE'
+  | 'EXIT_NORMAL'
+  | 'EXIT_ABNORMAL'
+  | 'TIMEOUT'
+  | 'RECONNECT'
+  | 'REMOVE';
+
+const transitions: Record<string, Partial<Record<string, TerminalState>>> = {
+  Created: { SPAWN: 'Starting' },
+  Starting: { SPAWN_SUCCESS: 'Running', SPAWN_FAILURE: 'Failed' },
+  Running: {
+    PROCESS_START: 'Busy',
+    WAIT_INPUT: 'WaitingInput',
+    CLOSE: 'Stopping',
+    EXIT_ABNORMAL: 'Disconnected',
+  },
+  Busy: { PROCESS_DONE: 'Running' },
+  WaitingInput: { USER_INPUT: 'Running', AUTO_RESUME: 'Running' },
+  Stopping: { EXIT_NORMAL: 'Stopped', TIMEOUT: 'Disconnected' },
+  Stopped: { REMOVE: 'Removed' },
+  Disconnected: { RECONNECT: 'Starting', REMOVE: 'Removed' },
+  Failed: { REMOVE: 'Removed' },
+  Removed: {},
+};
+
+export interface TerminalMachine {
+  getState(): TerminalState;
+  send(event: string | { type: string; [key: string]: unknown }): void;
+}
+
+export function createTerminalMachine(): TerminalMachine {
+  let state: TerminalState = 'Created';
+
+  function send(event: string | { type: string; [key: string]: unknown }): void {
+    const eventType = typeof event === 'string' ? event : event.type;
+    const next = transitions[state]?.[eventType];
+    if (next) {
+      state = next;
+    }
+  }
+
+  return {
+    getState(): TerminalState {
+      return state;
+    },
+    send,
+  };
+}

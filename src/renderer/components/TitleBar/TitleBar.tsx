@@ -4,12 +4,24 @@ interface TitleBarProps {
   focusMode: boolean
   onToggleFocusMode: () => void
   onCreateTerminal?: () => void
+  onToggleChatHistory?: () => void
+  showChatHistory?: boolean
+  onToggleConfigBrowser?: () => void
+  showConfigBrowser?: boolean
+  onToggleToolsBrowser?: () => void
+  showToolsBrowser?: boolean
 }
 
 export function TitleBar({
   focusMode,
   onToggleFocusMode,
-  onCreateTerminal
+  onCreateTerminal,
+  onToggleChatHistory,
+  showChatHistory,
+  onToggleConfigBrowser,
+  showConfigBrowser,
+  onToggleToolsBrowser,
+  showToolsBrowser
 }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false)
 
@@ -64,6 +76,39 @@ export function TitleBar({
       </div>
 
       <div className="title-bar-right">
+        {/* 聊天历史按钮 */}
+        {onToggleChatHistory && (
+          <button
+            className={`title-bar-btn chat-history-btn ${showChatHistory ? 'active' : ''}`}
+            onClick={onToggleChatHistory}
+            title="聊天历史 (Ctrl+H)"
+          >
+            📋
+          </button>
+        )}
+
+        {/* 配置浏览器按钮 */}
+        {onToggleConfigBrowser && (
+          <button
+            className={`title-bar-btn config-browser-btn ${showConfigBrowser ? 'active' : ''}`}
+            onClick={onToggleConfigBrowser}
+            title="Skills & MCP (Ctrl+Shift+S)"
+          >
+            ⚙️
+          </button>
+        )}
+
+        {/* 工具浏览器按钮 */}
+        {onToggleToolsBrowser && (
+          <button
+            className={`title-bar-btn tools-browser-btn ${showToolsBrowser ? 'active' : ''}`}
+            onClick={onToggleToolsBrowser}
+            title="CLI 工具管理 (Ctrl+Shift+T)"
+          >
+            🔧
+          </button>
+        )}
+
         {/* 聚焦模式切换 */}
         <button
           className={`title-bar-btn focus-mode-btn ${focusMode ? 'active' : ''}`}

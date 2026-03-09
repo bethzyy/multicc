@@ -1,7 +1,13 @@
 import { useState, useCallback, useEffect } from 'react'
 import { TitleBar } from './components/TitleBar/TitleBar'
 import { TileLayout } from './components/Layout/TileLayout'
+import { ChatHistoryPanel } from './components/chat'
+import { ConfigBrowser } from './components/config'
+import { ToolsBrowser } from './components/tools'
+import { UpdateNotification } from './components/update/UpdateNotification'
 import { v4 as uuidv4 } from 'uuid'
+import type { ChatSource } from '@shared/types/chat.types'
+import type { CustomCommand } from '@shared/types/tools.types'
 
 export interface TerminalInstance {
   id: string
@@ -14,6 +20,9 @@ function App() {
   const [terminals, setTerminals] = useState<TerminalInstance[]>([])
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const [focusMode, setFocusMode] = useState(false)
+  const [showChatHistory, setShowChatHistory] = useState(false)
+  const [showConfigBrowser, setShowConfigBrowser] = useState(false)
+  const [showToolsBrowser, setShowToolsBrowser] = useState(false)
 
   // 创建新终端
   const createTerminal = useCallback((cwd?: string) => {
@@ -22,7 +31,8 @@ function App() {
     const terminal: TerminalInstance = {
       id,
       name: `终端 ${terminals.length + 1}`,
-      cwd: cwd || ''
+      cwd: cwd || '',
+      isFocused: true
     }
     console.log('[App] new terminal:', terminal)
     setTerminals(prev => [...prev, terminal])
@@ -76,13 +86,125 @@ function App() {
 
   const focusedTerminal = terminals.find(t => t.id === focusedId)
 
+  // Handle resume session from chat history
+  const handleResumeSession = useCallback(async (info: { sessionId: string; cwd: string; source: ChatSource; customTitle?: string }) => {
+    console.log('[App] Resume session:', info)
+
+    // Create new terminal with the session's cwd
+    const id = uuidv4()
+    const terminal: TerminalInstance = {
+      id,
+      name: info.customTitle || `Session ${info.sessionId.slice(0, 8)}`,
+      cwd: info.cwd,
+      isFocused: true,
+    }
+
+    setTerminals(prev => [...prev, terminal])
+    setFocusedId(id)
+    setShowChatHistory(false)
+
+    // Wait for terminal to be created, then send resume command
+    setTimeout(() => {
+      const escapedCwd = info.cwd.replace(/([ ()&|;<>$`"'"'"'\\])/g, '\\$1')
+      const resumeCmd = info.source === 'codex'
+        ? `codex resume ${info.sessionId}`
+        : `claude --resume ${info.sessionId}`
+      window.electron.terminal.write(id, `cd ${escapedCwd} && ${resumeCmd}\n`)
+    }, 500)
+  }, [])
+
+  // Handle run custom command
+  const handleRunCustomCommand = useCallback((cmd: CustomCommand) => {
+    console.log('[App] Run custom command:', cmd)
+
+    // Create new terminal
+    const id = uuidv4()
+    const terminal: TerminalInstance = {
+      id,
+      name: cmd.name,
+      cwd: cmd.cwd || '',
+      isFocused: true,
+    }
+
+    setTerminals(prev => [...prev, terminal])
+    setFocusedId(id)
+    setShowToolsBrowser(false)
+
+    // Wait for terminal to be created, then send command
+    setTimeout(() => {
+      if (cmd.cwd) {
+        const escapedCwd = cmd.cwd.replace(/([ ()&|;<>$`"'"'"'\\])/g, '\\$1')
+        window.electron.terminal.write(id, `cd ${escapedCwd} && ${cmd.command}\n`)
+      } else {
+        window.electron.terminal.write(id, `${cmd.command}\n`)
+      }
+    }, 500)
+  }, [])
+
+  // Keyboard shortcut for chat history (Ctrl+H), config browser (Ctrl+Shift+S), and tools browser (Ctrl+Shift+T)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'h') {
+        e.preventDefault()
+        setShowChatHistory(prev => !prev)
+      }
+      if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+        e.preventDefault()
+        setShowConfigBrowser(prev => !prev)
+      }
+      if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+        e.preventDefault()
+        setShowToolsBrowser(prev => !prev)
+      }
+      if (e.key === 'Escape') {
+        if (showChatHistory) setShowChatHistory(false)
+        if (showConfigBrowser) setShowConfigBrowser(false)
+        if (showToolsBrowser) setShowToolsBrowser(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showChatHistory, showConfigBrowser, showToolsBrowser])
+
   return (
     <div className="app">
       <TitleBar
         focusMode={focusMode}
         onToggleFocusMode={toggleFocusMode}
         onCreateTerminal={createTerminal}
+        onToggleChatHistory={() => setShowChatHistory(prev => !prev)}
+        showChatHistory={showChatHistory}
+        onToggleConfigBrowser={() => setShowConfigBrowser(prev => !prev)}
+        showConfigBrowser={showConfigBrowser}
+        onToggleToolsBrowser={() => setShowToolsBrowser(prev => !prev)}
+        showToolsBrowser={showToolsBrowser}
       />
+
+      {/* Chat History Panel Overlay */}
+      {showChatHistory && (
+        <ChatHistoryPanel
+          onClose={() => setShowChatHistory(false)}
+          onResumeSession={handleResumeSession}
+        />
+      )}
+
+      {/* Config Browser Overlay */}
+      {showConfigBrowser && (
+        <ConfigBrowser
+          onClose={() => setShowConfigBrowser(false)}
+        />
+      )}
+
+      {/* Tools Browser Overlay */}
+      {showToolsBrowser && (
+        <ToolsBrowser
+          onClose={() => setShowToolsBrowser(false)}
+          onRunCommand={handleRunCustomCommand}
+        />
+      )}
+
+      {/* Update Notification */}
+      <UpdateNotification />
 
       <div className="app-body">
         {/* 主内容区 */}

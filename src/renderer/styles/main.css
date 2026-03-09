@@ -111,6 +111,17 @@ body {
   background-color: var(--accent-color);
 }
 
+/* Chat history button */
+.chat-history-btn {
+  width: auto !important;
+  padding: 0 8px;
+  font-size: 14px;
+}
+
+.chat-history-btn.active {
+  background-color: var(--accent-color);
+}
+
 /* 标题栏新建终端按钮 */
 .title-bar-btn.new-terminal-btn {
   width: auto;

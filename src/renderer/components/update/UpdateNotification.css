@@ -1,0 +1,164 @@
+/**
+ * Update Notification Styles
+ */
+
+.update-notification {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #2d2d2d;
+  border: 1px solid #3d3d3d;
+  border-radius: 8px;
+  padding: 16px 20px;
+  min-width: 280px;
+  max-width: 360px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 9999;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.update-notification__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.update-notification__icon {
+  font-size: 20px;
+}
+
+.update-notification__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e8e8e8;
+  flex: 1;
+}
+
+.update-notification__close {
+  background: none;
+  border: none;
+  color: #6d6d6d;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.update-notification__close:hover {
+  color: #e8e8e8;
+}
+
+.update-notification__body {
+  font-size: 13px;
+  color: #9d9d9d;
+  margin-bottom: 12px;
+}
+
+.update-notification__version {
+  color: #4fc3f7;
+  font-weight: 500;
+}
+
+/* Progress bar */
+.update-notification__progress {
+  margin-bottom: 12px;
+}
+
+.update-notification__progress-bar {
+  height: 4px;
+  background: #3d3d3d;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.update-notification__progress-fill {
+  height: 100%;
+  background: #0078d4;
+  transition: width 0.3s ease;
+}
+
+.update-notification__progress-text {
+  font-size: 11px;
+  color: #6d6d6d;
+  margin-top: 4px;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* Buttons */
+.update-notification__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.update-notification__button {
+  flex: 1;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.update-notification__button--primary {
+  background: #0078d4;
+  color: white;
+}
+
+.update-notification__button--primary:hover {
+  background: #1084d8;
+}
+
+.update-notification__button--primary:disabled {
+  background: #3d3d3d;
+  color: #6d6d6d;
+  cursor: not-allowed;
+}
+
+.update-notification__button--secondary {
+  background: #3d3d3d;
+  color: #9d9d9d;
+}
+
+.update-notification__button--secondary:hover {
+  background: #4d4d4d;
+}
+
+/* Status states */
+.update-notification--checking .update-notification__icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.update-notification--error {
+  border-color: #f14c4c;
+}
+
+.update-notification--error .update-notification__icon {
+  color: #f14c4c;
+}
+
+.update-notification--downloaded {
+  border-color: #0dbc79;
+}
+
+.update-notification--downloaded .update-notification__icon {
+  color: #0dbc79;
+}

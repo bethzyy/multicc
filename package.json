@@ -16,8 +16,10 @@
     "@lydell/node-pty": "^1.2.0-beta.3",
     "electron": "^40.6.1",
     "electron-store": "^10.0.0",
+    "electron-updater": "^6.8.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-window": "^2.2.7",
     "uuid": "^11.0.0",
     "xterm": "^5.3.0",
     "xterm-addon-fit": "^0.8.0",
@@ -55,6 +57,11 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "caie",
+      "repo": "multicc"
     }
   }
 }

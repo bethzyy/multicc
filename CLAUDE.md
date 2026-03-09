@@ -11,13 +11,17 @@ MultiCC - Claude Code 多窗口管理器 (Windows 版)
 ## Commands
 
 ```bash
-npm run dev           # 开发模式（热重载）
-npm run build         # 构建应用
-npm run build:win     # 构建 Windows 可执行文件 (nsis + portable)
-npm install --ignore-scripts  # 安装依赖（跳过 node-pty 编译）
+npm run dev              # 开发模式（热重载）
+npm run build            # 构建应用
+npm run build:win        # 构建 Windows 可执行文件 (nsis + portable)
+npm run build:win:arm    # 构建 Windows ARM64 可执行文件
+npm run preview          # 预览构建结果
+npm install --ignore-scripts  # 安装依赖（跳过 node-pty 编译，必须使用）
 ```
 
 **运行应用：** 双击 `start.bat` 或执行 `npm run dev`
+
+**构建输出：** `dist/` 目录（NSIS 安装包 + 便携版）
 
 ## Architecture
 
@@ -78,15 +82,31 @@ npm install --ignore-scripts  # 安装依赖（跳过 node-pty 编译）
 ### IPC API (preload/index.ts)
 
 ```typescript
-window.electron.terminal.create(id, cols, rows, cwd)  // 创建 PTY
-window.electron.terminal.write(id, data)              // 写入数据
-window.electron.terminal.resize(id, cols, rows)       // 调整大小
-window.electron.terminal.destroy(id)                  // 销毁终端
-window.electron.terminal.onData(callback)             // 监听输出
-window.electron.terminal.onExit(callback)             // 监听退出
-window.electron.config.getWorkingDirs()               // 获取工作目录列表
-window.electron.session.save/load/list/delete()       // 会话管理
+// 终端操作（双向通信）
+window.electron.terminal.create(id, cols, rows, cwd)  // 创建 PTY (invoke)
+window.electron.terminal.write(id, data)              // 写入数据 (send)
+window.electron.terminal.resize(id, cols, rows)       // 调整大小 (invoke)
+window.electron.terminal.destroy(id)                  // 销毁终端 (invoke)
+window.electron.terminal.onData(callback)             // 监听输出 (on)
+window.electron.terminal.onExit(callback)             // 监听退出 (on)
+
+// 配置管理（invoke，返回 Promise）
+window.electron.config.getClaudePath()
+window.electron.config.setClaudePath(path)
+window.electron.config.getWorkingDirs()
+window.electron.config.addWorkingDir(path)
+window.electron.config.removeWorkingDir(path)
+
+// 会话存档（invoke，返回 Promise）
+window.electron.session.save/load/list/delete(id)
+
+// 窗口控制（invoke，返回 Promise）
+window.electron.window.minimize/maximize/close/isMaximized()
 ```
+
+**IPC 通信模式：**
+- `invoke/send`: 渲染进程 → 主进程（使用 `ipcRenderer.invoke/send`）
+- `on`: 主进程 → 渲染进程（使用 `ipcRenderer.on` 监听 `webContents.send`）
 
 ### Focus Mode Architecture
 
@@ -99,16 +119,74 @@ window.electron.session.save/load/list/delete()       // 会话管理
    - 其他终端: `.terminal-wrapper.hidden` (display: none)
 4. `TerminalPane` 使用 `ResizeObserver` 自动调用 `fitAddon.fit()` 调整大小
 
+**CSS 实现细节：**
+```css
+/* 聚焦模式激活 */
+.tile-layout.focus-mode-active {
+  display: block;  /* 从 grid 切换为 block */
+  padding: 0;
+}
+
+/* 隐藏非焦点终端 */
+.terminal-wrapper.hidden {
+  display: none;
+}
+
+/* 全屏显示焦点终端 */
+.terminal-wrapper.focused-visible {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+```
+
 ### Configuration
 
 配置文件：`%APPDATA%/multicc/config.json`
 会话存储：`%APPDATA%/multicc/sessions/{id}.json`
+
+**TypeScript 路径别名：**
+```typescript
+@/*              → src/*
+@main/*          → src/main/*
+@renderer/*      → src/renderer/*
+```
+
+**TypeScript 配置：**
+- 严格模式已启用 (`strict: true`)
+- 未使用变量/参数检测 (`noUnusedLocals`, `noUnusedParameters`)
+- JSX 使用 `react-jsx` 转换（React 19 新架构）
 
 ## Known Issues
 
 **node-pty 编译问题：** 使用 `@lydell/node-pty` 预编译版本，安装时加 `--ignore-scripts`
 
 **React.StrictMode 双重渲染：** 已在 `src/renderer/main.tsx` 移除 StrictMode，避免 useEffect 执行两次导致终端重复创建/销毁
+
+## Important Implementation Details
+
+### 终端复制粘贴处理
+
+TerminalPane 实现了智能复制粘贴：
+- **Ctrl+C**: 有选中文字时复制，否则作为中断信号发送
+- **Ctrl+V**: 粘贴剪贴板内容到终端
+- **右键菜单**: 选中文字时复制，否则粘贴
+- 使用捕获阶段 (`{ capture: true }`) 拦截键盘事件
+
+### 终端缓冲区管理
+
+PtyService 维护每个终端的输出缓冲区：
+- 最大 100KB，超过时截断保留最新 50KB
+- 用于重连时恢复终端历史（未来功能）
+
+### 环境变量处理
+
+创建 PTY 时移除 `CLAUDECODE` 环境变量（`pty.ts:28`）：
+```typescript
+const { CLAUDECODE, ...envWithoutClaudeCode } = process.env
+```
+
+这允许在 multicc 终端中嵌套运行 Claude Code，否则会报 "cannot be launched inside another session" 错误。
 
 ## Solved Issues
 

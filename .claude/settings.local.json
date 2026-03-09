@@ -1,8 +1,75 @@
 {
   "permissions": {
     "allow": [
+      "Skill(*)",
       "mcp__web-search-prime__webSearchPrime",
-      "Bash(start:*)"
+      "Bash(start:*)",
+      "Bash(python:*)",
+      "Bash(ls:*)",
+      "Bash(rm:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "WebSearch",
+      "Bash(test:*)",
+      "Bash(cat:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(cmd:*)",
+      "Bash(bash:*)",
+      "Bash(findstr \":5000\\\\|:5009\\\\|:5010\")",
+      "Bash(curl:*)",
+      "mcp__zread__get_repo_structure",
+      "mcp__web-search-prime__web_search_prime",
+      "mcp__web-reader__webReader",
+      "Bash(npx tsc:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(npm:*)",
+      "Bash(cp:*)",
+      "Bash(git config:*)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "os == 'windows'",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\Users\\yingy\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe\" \"C:\\D\\CAIE_tool\\MyAIProduct\\.claude\\scripts\\notify.py\" \"【会话结束】可以继续了\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "os == 'windows'",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\Users\\yingy\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe\" \"C:\\D\\CAIE_tool\\MyAIProduct\\.claude\\scripts\\notify.py\" \"【任务完成】已完成操作\""
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\Users\\yingy\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe\" \"C:\\D\\CAIE_tool\\MyAIProduct\\.claude\\scripts\\notify.py\" \"【等待输入】请告诉我下一步做什么\""
+          }
+        ]
+      },
+      {
+        "matcher": "message contains 'Do you want to proceed?' || message contains '请选择' || message contains '是否继续'",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\Users\\yingy\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe\" \"C:\\D\\CAIE_tool\\MyAIProduct\\.claude\\scripts\\notify.py\" \"【权限确认】需要您批准才能继续\""
+          }
+        ]
+      }
     ]
   }
 }

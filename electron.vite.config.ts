@@ -5,6 +5,12 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    resolve: {
+      alias: {
+        '@main': resolve(__dirname, 'src/main'),
+        '@shared': resolve(__dirname, 'src/shared')
+      }
+    },
     build: {
       rollupOptions: {
         input: {
@@ -15,6 +21,11 @@ export default defineConfig({
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
+    resolve: {
+      alias: {
+        '@shared': resolve(__dirname, 'src/shared')
+      }
+    },
     build: {
       rollupOptions: {
         input: {
@@ -27,7 +38,8 @@ export default defineConfig({
     plugins: [react()],
     resolve: {
       alias: {
-        '@renderer': resolve(__dirname, 'src/renderer')
+        '@renderer': resolve(__dirname, 'src/renderer'),
+        '@shared': resolve(__dirname, 'src/shared')
       }
     },
     build: {

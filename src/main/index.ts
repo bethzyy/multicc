@@ -3,6 +3,10 @@ import { join } from 'path'
 import { PtyService } from './services/pty'
 import { ConfigService } from './services/config'
 import { StoreService } from './services/store'
+import { registerChatHandlers } from './ipc/chat-handlers'
+import { registerConfigHandlers } from './ipc/config-handlers'
+import { registerUpdateHandlers } from './ipc/update-handlers'
+import { registerToolsHandlers } from './ipc/tools-handlers'
 
 // 禁用 GPU 缓存警告
 app.commandLine.appendSwitch('disable-gpu-cache')
@@ -98,6 +102,20 @@ function registerIpcHandlers() {
   ipcMain.handle('session:load', (_, id) => storeService.loadSession(id))
   ipcMain.handle('session:list', () => storeService.listSessions())
   ipcMain.handle('session:delete', (_, id) => storeService.deleteSession(id))
+
+  // 聊天历史 (新增)
+  registerChatHandlers(mainWindow!)
+
+  // 配置/Skills/MCP (新增)
+  registerConfigHandlers(mainWindow!)
+
+  // CLI 工具管理 (新增)
+  registerToolsHandlers(mainWindow!, storeService)
+
+  // 自动更新 (生产环境)
+  if (!isDev) {
+    registerUpdateHandlers(mainWindow!)
+  }
 }
 
 // 应用就绪
