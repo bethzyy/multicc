@@ -315,6 +315,25 @@ private async cleanupProcessTree(pid: number) {
 | WMI Provider CPU | 异常高 | 正常 |
 | 关闭终端后 CPU | 不降 | 立即下降 |
 
+**验证状态**：✓ 已通过双重验证（2026-03-10）
+- 代码层面：10/10 检查项通过
+- 运行时：用户手动测试确认效果
+
+**验证脚本**：`test/cpu-optimization-verify.js`
+```bash
+# 运行验证
+node test/cpu-optimization-verify.js
+```
+
 **相关文件**：
 - `src/main/services/pty.ts` - 统一轮询调度器、智能跳过、进程树清理
 - `src/main/services/terminal/WindowsProcessDetector.ts` - `getChildPidsAsync()` 函数
+- `test/cpu-optimization-verify.js` - 双重验证脚本
+
+## Version History
+
+- **2026-03-10**: 高 CPU 消耗问题修复 + 双重验证
+  - 统一轮询调度器：4×2s → 1×5s
+  - 智能跳过机制：缓存 PID，跳过 90%+ 重复检测
+  - 进程树清理：消除孤儿进程
+  - 验证脚本：`test/cpu-optimization-verify.js`
