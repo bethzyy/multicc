@@ -9,7 +9,7 @@ import {
   detectCommandState,
   StateChangeDebouncer
 } from './terminal/OscParser'
-import { detectForegroundProcess, detectForegroundProcessAsync } from './terminal/WindowsProcessDetector'
+import { detectForegroundProcess, detectForegroundProcessAsync, getChildPidsAsync } from './terminal/WindowsProcessDetector'
 
 const execAsync = promisify(exec)
 
@@ -21,7 +21,7 @@ interface PtyInstance {
   state: 'running' | 'waiting_input' | 'busy'
   foregroundProcess: string | null
   foregroundProcessPid: number | null  // 缓存进程 PID，用于轻量级存在性检查
-  cwdPollTimer?: ReturnType<typeof setInterval>
+  lastPolledPid: number | null  // 上次轮询检测到的进程 PID（用于智能跳过）
 }
 
 export class PtyService {
@@ -30,8 +30,68 @@ export class PtyService {
   private stateDebouncers: Map<string, StateChangeDebouncer> = new Map()
   private isShuttingDown = false  // 关闭标记，防止关闭时执行阻塞操作
 
+  // 统一轮询调度器（Phase 1 优化：解决 WMI 查询风暴）
+  private globalPollTimer?: ReturnType<typeof setInterval>
+  private pollQueue: string[] = []  // 终端 ID 队列
+  private currentPollIndex = 0
+  private static readonly POLL_INTERVAL_MS = 5000  // 从 2 秒增加到 5 秒
+
   constructor(window: BrowserWindow) {
     this.window = window
+  }
+
+  /**
+   * 启动统一轮询调度器
+   * 所有终端共享一个定时器，每次只轮询一个终端，避免同时查询 WMI
+   */
+  private startGlobalPoller() {
+    if (this.globalPollTimer) return
+
+    this.globalPollTimer = setInterval(() => {
+      if (this.pollQueue.length === 0 || this.isShuttingDown) return
+
+      // 每次只轮询一个终端（错开 WMI 查询）
+      const id = this.pollQueue[this.currentPollIndex]
+      this.currentPollIndex = (this.currentPollIndex + 1) % this.pollQueue.length
+
+      // 异步轮询，不阻塞
+      this.pollCwd(id).catch(err => {
+        console.warn(`[PtyService] Poll error for ${id}:`, err)
+      })
+    }, PtyService.POLL_INTERVAL_MS)
+
+    console.log('[PTY] Global poller started, interval:', PtyService.POLL_INTERVAL_MS, 'ms')
+  }
+
+  /**
+   * 停止统一轮询调度器
+   */
+  private stopGlobalPoller() {
+    if (this.globalPollTimer) {
+      clearInterval(this.globalPollTimer)
+      this.globalPollTimer = undefined
+      console.log('[PTY] Global poller stopped')
+    }
+  }
+
+  /**
+   * 递归终止进程树
+   * 确保所有子进程都被清理，避免孤儿进程
+   */
+  private async cleanupProcessTree(pid: number) {
+    try {
+      const children = await getChildPidsAsync(pid)
+      for (const childPid of children) {
+        try {
+          process.kill(childPid, 'SIGTERM')
+          console.log('[PTY] Killed child process:', childPid)
+        } catch {
+          // 进程可能已不存在
+        }
+      }
+    } catch (err) {
+      console.warn('[PTY] Failed to cleanup process tree for', pid, ':', err)
+    }
   }
 
   create(id: string, cols: number, rows: number, cwd?: string): boolean {
@@ -96,17 +156,16 @@ export class PtyService {
         cwd: workingDir,
         state: 'running',
         foregroundProcess: null,
-        foregroundProcessPid: null
+        foregroundProcessPid: null,
+        lastPolledPid: null
       })
 
       // 立即发送初始 cwd 到渲染进程（修复路径不显示问题）
       this.window.webContents.send('terminal:cwd', { id, cwd: workingDir })
 
-      // 启动 cwd 轮询（每 2 秒检测一次）
-      const instanceForTimer = this.instances.get(id)!
-      instanceForTimer.cwdPollTimer = setInterval(() => {
-        this.pollCwd(id)
-      }, 2000)
+      // 添加到统一轮询队列（Phase 1 优化：替代独立定时器）
+      this.pollQueue.push(id)
+      this.startGlobalPoller()
 
       console.log('[PTY] Total instances:', this.instances.size)
 
@@ -215,6 +274,10 @@ export class PtyService {
    * - pollCwd 改为异步方法
    * - 使用 detectForegroundProcessAsync 替代同步版本
    * - 使用 isProcessRunningAsync 替代同步版本
+   *
+   * v7 统一轮询 + 智能跳过（Phase 1 & 2 优化）
+   * - 所有终端共享一个 5 秒定时器，每次只轮询一个
+   * - 如果上次检测的进程 PID 未变，跳过完整检测
    */
   private async pollCwd(id: string): Promise<void> {
     // 关闭时跳过轮询，避免阻塞
@@ -223,18 +286,32 @@ export class PtyService {
     const instance = this.instances.get(id)
     if (!instance || !instance.pty.pid) return
 
+    // Phase 2: 智能跳过 - 如果上次检测到的进程还在运行，跳过完整检测
+    if (instance.lastPolledPid) {
+      const stillRunning = await this.isProcessRunningAsync(instance.lastPolledPid)
+      if (stillRunning) {
+        // 进程仍在运行，跳过完整 WMI 检测
+        return
+      }
+      // 进程已结束，清除缓存
+      instance.lastPolledPid = null
+    }
+
     // 如果已经有前台进程在运行，先检查进程是否还存在（轻量级异步检查）
     if (instance.foregroundProcess && instance.foregroundProcess !== 'pending') {
       // 轻量级检查：进程是否还在运行
       const stillRunning = await this.isProcessRunningAsync(instance.foregroundProcessPid)
       if (stillRunning) {
         // 进程还在运行，不需要重新检测，直接返回
+        // 同时更新 lastPolledPid 用于下次智能跳过
+        instance.lastPolledPid = instance.foregroundProcessPid
         return
       }
       // 进程已结束，清除标记
       console.log('[PTY] Foreground process ended:', instance.foregroundProcess)
       instance.foregroundProcess = null
       instance.foregroundProcessPid = null
+      instance.lastPolledPid = null
     }
 
     // 没有前台进程或进程已结束，执行异步检测
@@ -244,6 +321,7 @@ export class PtyService {
       // 缓存进程信息
       instance.foregroundProcess = processInfo.name
       instance.foregroundProcessPid = processInfo.pid
+      instance.lastPolledPid = processInfo.pid  // Phase 2: 用于下次智能跳过
       this.window.webContents.send('terminal:process', {
         id,
         process: processInfo.name,
@@ -420,24 +498,45 @@ export class PtyService {
   destroy(id: string): void {
     const instance = this.instances.get(id)
     if (instance) {
-      // 清除 cwd 轮询定时器
-      if (instance.cwdPollTimer) {
-        clearInterval(instance.cwdPollTimer)
+      // 从轮询队列中移除（Phase 1 优化）
+      const index = this.pollQueue.indexOf(id)
+      if (index !== -1) {
+        this.pollQueue.splice(index, 1)
+        // 调整当前索引，避免越界
+        if (this.currentPollIndex >= index && this.currentPollIndex > 0) {
+          this.currentPollIndex--
+        }
       }
+
+      // 如果没有终端了，停止全局轮询器
+      if (this.pollQueue.length === 0) {
+        this.stopGlobalPoller()
+      }
+
+      // 递归终止进程树（Phase 1 优化：避免孤儿进程）
+      const pid = instance.pty.pid
+      this.cleanupProcessTree(pid).catch(err => {
+        console.warn('[PTY] Failed to cleanup process tree:', err)
+      })
+
       instance.pty.kill()
       this.instances.delete(id)
+      console.log('[PTY] Terminal destroyed:', id)
     }
   }
 
   destroyAll(): void {
     this.isShuttingDown = true
 
-    // 先清除所有定时器（防止关闭时执行阻塞的 execSync）
+    // 停止统一轮询调度器（Phase 1 优化）
+    this.stopGlobalPoller()
+    this.pollQueue = []
+    this.currentPollIndex = 0
+
+    // 递归终止所有进程树
     const instances = Array.from(this.instances.values())
     for (const instance of instances) {
-      if (instance.cwdPollTimer) {
-        clearInterval(instance.cwdPollTimer)
-      }
+      this.cleanupProcessTree(instance.pty.pid).catch(() => {})
     }
 
     // 再销毁所有 PTY 进程

@@ -258,3 +258,63 @@ const { CLAUDECODE, ...envWithoutClaudeCode } = process.env
 **相关文件**：
 - `src/main/services/pty.ts` - `pollCwd()` 方法
 - `src/main/services/terminal/WindowsProcessDetector.ts` - `detectForegroundProcess()` 函数
+
+### 高 CPU 消耗问题（WMI 查询风暴）
+
+**问题描述**：开 4 个 Claude Code 实例时，multicc CPU 占用 ~80%，而 4 个独立 CMD 窗口只有 ~20%。`WMI Provider Host` 进程 CPU 异常高。
+
+**根本原因**：
+1. **WMI 查询风暴**：每个终端独立 2 秒轮询，每次轮询执行复杂的进程树遍历（PowerShell WMI 查询）
+2. **资源清理不彻底**：关闭终端后，PTY 子进程（如 node.exe）可能成为孤儿进程
+3. **无智能跳过**：即使前台进程未变化，每次轮询都执行完整检测
+
+**解决方案（Phase 1 & 2）**：
+
+1. **统一轮询调度器**：
+   - 所有终端共享一个 5 秒定时器
+   - 每次只轮询一个终端（错开 WMI 查询）
+   - 轮询间隔从 2 秒增加到 5 秒
+
+2. **智能跳过机制**：
+   - 缓存上次检测到的进程 PID (`lastPolledPid`)
+   - 如果进程仍在运行，跳过完整 WMI 检测
+   - 只用轻量级 `tasklist` 检查进程是否存在
+
+3. **进程树清理**：
+   - 关闭终端时递归终止所有子进程
+   - 避免孤儿进程继续消耗资源
+
+**代码变更**：
+```typescript
+// 统一轮询调度器
+private globalPollTimer?: ReturnType<typeof setInterval>
+private pollQueue: string[] = []
+private static readonly POLL_INTERVAL_MS = 5000  // 从 2 秒增加到 5 秒
+
+// 智能跳过
+if (instance.lastPolledPid) {
+  const stillRunning = await this.isProcessRunningAsync(instance.lastPolledPid)
+  if (stillRunning) {
+    return  // 跳过完整 WMI 检测
+  }
+}
+
+// 进程树清理
+private async cleanupProcessTree(pid: number) {
+  const children = await getChildPidsAsync(pid)
+  for (const childPid of children) {
+    process.kill(childPid, 'SIGTERM')
+  }
+}
+```
+
+**预期效果**：
+| 指标 | 修复前 | 修复后 |
+|------|--------|--------|
+| 4 个 Claude CPU | ~80% | ~20-30% |
+| WMI Provider CPU | 异常高 | 正常 |
+| 关闭终端后 CPU | 不降 | 立即下降 |
+
+**相关文件**：
+- `src/main/services/pty.ts` - 统一轮询调度器、智能跳过、进程树清理
+- `src/main/services/terminal/WindowsProcessDetector.ts` - `getChildPidsAsync()` 函数
