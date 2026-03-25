@@ -148,6 +148,10 @@ export function TerminalPane({
     const resizeObserver = new ResizeObserver(() => {
       try {
         fitAddon.fit()
+        // fit 后立即滚动到底部，防止内容跳到上面
+        requestAnimationFrame(() => {
+          xterm.scrollToBottom()
+        })
       } catch (e) {
         console.warn('ResizeObserver fit failed:', e)
       }
@@ -249,27 +253,21 @@ export function TerminalPane({
     }
   }, [terminal.id, terminal.cwd])
 
-  // 聚焦时自动调整大小并聚焦终端
+  // 聚焦时自动调整大小、聚焦终端、滚动到底部
   useEffect(() => {
     if (isFocused && fitAddonRef.current && xtermRef.current) {
       setTimeout(() => {
         try {
           fitAddonRef.current?.fit()
           xtermRef.current?.focus()
+          // fit 后滚动到底部
+          requestAnimationFrame(() => {
+            xtermRef.current?.scrollToBottom()
+          })
         } catch (e) {
           console.warn('Focus fit failed:', e)
         }
       }, 0)
-    }
-  }, [isFocused])
-
-  // 聚焦时滚动到底部
-  useEffect(() => {
-    if (isFocused && xtermRef.current) {
-      // 延迟执行，确保终端已完成渲染
-      requestAnimationFrame(() => {
-        xtermRef.current?.scrollToBottom()
-      })
     }
   }, [isFocused])
 
