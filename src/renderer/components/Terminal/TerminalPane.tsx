@@ -188,17 +188,20 @@ export function TerminalPane({
         // 没有选中文字，允许 Ctrl+C 作为中断信号
         console.log('[Terminal] No selection, allowing Ctrl+C as interrupt')
       }
-      // Ctrl+V：粘贴
+
+      // Ctrl+V：使用 XTerm.js 的 paste API 正确处理粘贴
       if (e.ctrlKey && !e.shiftKey && (e.key === 'v' || e.key === 'V')) {
-        console.log('[Terminal] Ctrl+V pressed, pasting...')
+        e.preventDefault()
+        e.stopPropagation()
         navigator.clipboard.readText().then(text => {
-          console.log('[Terminal] Pasting text:', text)
-          window.electron.terminal.write(terminal.id, text)
+          if (text) {
+            console.log('[Terminal] Pasting text via xterm.paste():', text.length, 'chars')
+            xterm.paste(text)
+          }
         }).catch(err => {
           console.error('[Terminal] Paste failed:', err)
         })
-        e.preventDefault()
-        e.stopPropagation()
+        return
       }
     }
 
@@ -210,7 +213,10 @@ export function TerminalPane({
         navigator.clipboard.writeText(selection)
       } else {
         navigator.clipboard.readText().then(text => {
-          window.electron.terminal.write(terminal.id, text)
+          if (text) {
+            console.log('[Terminal] Right-click paste via xterm.paste():', text.length, 'chars')
+            xterm.paste(text)
+          }
         })
       }
     }
