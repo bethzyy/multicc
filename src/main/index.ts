@@ -16,10 +16,12 @@ app.commandLine.appendSwitch('disable-software-rasterizer')
 // H10: 全局错误处理
 process.on('uncaughtException', (error) => {
   console.error('[Main] Uncaught exception:', error)
+  // 不退出进程，只记录。Electron native 崩溃会自行退出
 })
 
 process.on('unhandledRejection', (reason) => {
   console.error('[Main] Unhandled rejection:', reason)
+  // 不退出进程，只记录
 })
 
 let mainWindow: BrowserWindow | null = null
@@ -84,36 +86,53 @@ function registerIpcHandlers() {
 
   // 终端操作
   ipcMain.handle('terminal:create', (_, { id, cols, rows, cwd }) => {
-    // C2: 参数验证
-    if (!id || typeof id !== 'string') {
-      console.warn('[Main] terminal:create rejected: invalid id')
+    try {
+      // C2: 参数验证
+      if (!id || typeof id !== 'string') {
+        console.warn('[Main] terminal:create rejected: invalid id')
+        return false
+      }
+      if (!Number.isInteger(cols) || cols < 1 || cols > 500 ||
+          !Number.isInteger(rows) || rows < 1 || rows > 500) {
+        console.warn('[Main] terminal:create rejected: invalid cols/rows', { cols, rows })
+        return false
+      }
+      if (cwd && !isValidWorkingDir(cwd)) {
+        console.warn('[Main] terminal:create rejected: invalid cwd', { cwd })
+        return false
+      }
+      console.log('[Main] terminal:create called:', { id, cols, rows, cwd })
+      return ptyService.create(id, cols, rows, cwd)
+    } catch (error) {
+      console.error('[Main] terminal:create error:', error)
       return false
     }
-    if (!Number.isInteger(cols) || cols < 1 || cols > 500 ||
-        !Number.isInteger(rows) || rows < 1 || rows > 500) {
-      console.warn('[Main] terminal:create rejected: invalid cols/rows', { cols, rows })
-      return false
-    }
-    if (cwd && !isValidWorkingDir(cwd)) {
-      console.warn('[Main] terminal:create rejected: invalid cwd', { cwd })
-      return false
-    }
-    console.log('[Main] terminal:create called:', { id, cols, rows, cwd })
-    return ptyService.create(id, cols, rows, cwd)
   })
 
   ipcMain.on('terminal:write', (_, { id, data }) => {
-    if (!id || typeof id !== 'string' || !ptyService.hasInstance(id)) return
-    if (typeof data !== 'string') return
-    ptyService.write(id, data)
+    try {
+      if (!id || typeof id !== 'string' || !ptyService.hasInstance(id)) return
+      if (typeof data !== 'string') return
+      ptyService.write(id, data)
+    } catch (error) {
+      console.error('[Main] terminal:write error:', error)
+    }
   })
 
   ipcMain.handle('terminal:resize', (_, { id, cols, rows }) => {
-    ptyService.resize(id, cols, rows)
+    try {
+      ptyService.resize(id, cols, rows)
+    } catch (error) {
+      console.error('[Main] terminal:resize error:', error)
+    }
   })
 
   ipcMain.handle('terminal:destroy', (_, { id }) => {
-    ptyService.destroy(id)
+    try {
+      ptyService.destroy(id)
+    } catch (error) {
+      console.error('[Main] terminal:destroy error:', error)
+    }
   })
 
   // 配置管理

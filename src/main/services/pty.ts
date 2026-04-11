@@ -4,9 +4,8 @@ import { exec, execSync } from 'child_process'
 import * as fs from 'fs'
 import { promisify } from 'util'
 import {
+  parseOscSequences,
   extractLatestCwd,
-  detectWaitingForInput,
-  detectCommandState,
   StateChangeDebouncer
 } from './terminal/OscParser'
 import { detectForegroundProcessAsync, getChildPidsAsync } from './terminal/WindowsProcessDetector'
@@ -29,6 +28,10 @@ export class PtyService {
   private window: BrowserWindow
   private stateDebouncers: Map<string, StateChangeDebouncer> = new Map()
   private isShuttingDown = false  // 关闭标记，防止关闭时执行阻塞操作
+  private detectingPids: Set<string> = new Set()  // 防止并发进程检测
+  private dataBatchBuffers: Map<string, string> = new Map()  // 数据合并缓冲
+  private dataBatchTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()  // 合并定时器
+  private static readonly DATA_BATCH_MS = 16  // ~60fps 合并发送
 
   // 统一轮询调度器（Phase 1 优化：解决 WMI 查询风暴）
   private globalPollTimer?: ReturnType<typeof setInterval>
@@ -38,6 +41,40 @@ export class PtyService {
 
   constructor(window: BrowserWindow) {
     this.window = window
+  }
+
+  /**
+   * 安全发送 IPC 消息到渲染进程
+   * 防止窗口已销毁时 webContents.send 抛异常导致主进程崩溃
+   */
+  private safeSend(channel: string, ...args: unknown[]): void {
+    try {
+      if (!this.window.isDestroyed()) {
+        this.window.webContents.send(channel, ...args)
+      }
+    } catch (err) {
+      // 窗口已销毁时静默忽略
+    }
+  }
+
+  /**
+   * 合并发送终端数据到渲染进程
+   * 16ms 内的多个小 chunk 合并为一次 IPC 调用，减少渲染进程压力
+   */
+  private batchSendData(id: string, data: string): void {
+    const existing = this.dataBatchBuffers.get(id) || ''
+    this.dataBatchBuffers.set(id, existing + data)
+
+    if (!this.dataBatchTimers.has(id)) {
+      this.dataBatchTimers.set(id, setTimeout(() => {
+        const batched = this.dataBatchBuffers.get(id)
+        this.dataBatchBuffers.delete(id)
+        this.dataBatchTimers.delete(id)
+        if (batched) {
+          this.safeSend('terminal:data', { id, data: batched })
+        }
+      }, PtyService.DATA_BATCH_MS))
+    }
   }
 
   /**
@@ -124,27 +161,27 @@ export class PtyService {
       const debouncer = new StateChangeDebouncer(50)
       this.stateDebouncers.set(id, debouncer)
 
-      // 监听输出
+      // 监听输出 — 使用合并缓冲减少 IPC 压力
       ptyProcess.onData((data: string) => {
-        console.log('[PTY] onData for', id, ':', data.length, 'bytes')
+        if (this.isShuttingDown) return
         const instance = this.instances.get(id)
         if (instance) {
           instance.buffer += data
           if (instance.buffer.length > 100000) {
             instance.buffer = instance.buffer.slice(-50000)
           }
-
-          // Parse OSC sequences for state detection
+          // OSC 解析必须在每个 chunk 上执行（不能合并），用于状态检测
           this.processTerminalOutput(id, data, instance)
         }
-        // 确保数据是字符串
-        this.window.webContents.send('terminal:data', { id, data: String(data) })
+        // 数据传输走合并缓冲，减少 IPC 调用频率
+        this.batchSendData(id, data)
       })
 
       // 监听退出
       ptyProcess.onExit(({ exitCode }) => {
+        if (this.isShuttingDown) return  // 关闭时不再发送事件
         console.log('[PTY] Process exited:', id, 'code:', exitCode)
-        this.window.webContents.send('terminal:exit', { id, exitCode })
+        this.safeSend('terminal:exit', { id, exitCode })
         this.instances.delete(id)
         this.stateDebouncers.delete(id)
       })
@@ -161,7 +198,7 @@ export class PtyService {
       })
 
       // 立即发送初始 cwd 到渲染进程（修复路径不显示问题）
-      this.window.webContents.send('terminal:cwd', { id, cwd: workingDir })
+      this.safeSend('terminal:cwd', { id, cwd: workingDir })
 
       // 添加到统一轮询队列（Phase 1 优化：替代独立定时器）
       this.pollQueue.push(id)
@@ -178,57 +215,71 @@ export class PtyService {
 
   /**
    * Process terminal output for state detection
+   * v2: 单次解析 OSC 序列 + 并发保护，防止重负载下进程检测风暴
    */
   private processTerminalOutput(id: string, data: string, instance: PtyInstance): void {
-    // 只有在没有前台进程时才更新 cwd（避免子进程输出中的乱码）
+    // 单次解析所有 OSC 序列，避免重复正则匹配
+    const sequences = parseOscSequences(data)
+
+    // CWD 检测：只有在没有前台进程时才更新（避免子进程输出中的乱码）
     if (!instance.foregroundProcess) {
-      const newCwd = extractLatestCwd(data)
-      // 验证路径是否有效（必须是有效的 Windows 路径格式）
+      const osc99 = sequences.filter(s => s.type === 'osc99').pop()
+      const osc7 = sequences.filter(s => s.type === 'osc7').pop()
+      const newCwd = osc99?.value || osc7?.value || null
       if (newCwd && newCwd !== instance.cwd && this.isValidCwdPath(newCwd)) {
         instance.cwd = newCwd
-        this.window.webContents.send('terminal:cwd', { id, cwd: newCwd })
+        this.safeSend('terminal:cwd', { id, cwd: newCwd })
       }
     }
 
-    // Detect waiting for input
-    const waitingState = detectWaitingForInput(data)
+    // 输入等待检测
+    const isWaiting = sequences.some(s => s.type === 'bell') ||
+                      sequences.some(s => s.type === 'osc133' && s.value === 'A')
     const debouncer = this.stateDebouncers.get(id)
     if (debouncer) {
-      const newState = waitingState.isWaiting ? 'waiting_input' : 'running'
+      const newState = isWaiting ? 'waiting_input' : 'running'
       debouncer.notify(newState, (state) => {
         if (instance.state !== state) {
           instance.state = state as 'running' | 'waiting_input' | 'busy'
-          this.window.webContents.send('terminal:state', { id, state })
+          this.safeSend('terminal:state', { id, state })
         }
       })
     }
 
-    // Detect command state changes
-    const cmdState = detectCommandState(data)
-    if (cmdState.commandStarted) {
-      instance.state = 'busy'
-      // 立即设置标记，阻止 OSC 解析（避免子进程启动期间的乱码）
-      instance.foregroundProcess = 'pending'
-      this.window.webContents.send('terminal:state', { id, state: 'busy' })
+    // 命令状态检测
+    const osc133 = sequences.filter(s => s.type === 'osc133')
+    const commandStarted = osc133.some(s => s.value === 'B' || s.value === 'C')
+    const commandEnded = osc133.some(s => s.value === 'D')
+    const isPromptReady = osc133.some(s => s.value === 'A')
 
-      // Detect foreground process (will update the process name)
-      this.detectForegroundProcessAsyncHandler(id, instance)
+    if (commandStarted) {
+      instance.state = 'busy'
+      instance.foregroundProcess = 'pending'
+      this.safeSend('terminal:state', { id, state: 'busy' })
+
+      // 并发保护：同一终端同时只有一个进程检测
+      if (!this.detectingPids.has(id)) {
+        this.detectForegroundProcessAsyncHandler(id, instance)
+      }
     }
-    if (cmdState.commandEnded || cmdState.isPromptReady) {
+    if (commandEnded || isPromptReady) {
       instance.state = 'running'
-      instance.foregroundProcess = null  // 清除前台进程，允许更新路径
-      instance.foregroundProcessPid = null  // 清除缓存的 PID
-      this.window.webContents.send('terminal:state', { id, state: 'running' })
+      instance.foregroundProcess = null
+      instance.foregroundProcessPid = null
+      this.safeSend('terminal:state', { id, state: 'running' })
     }
   }
 
   /**
    * Detect foreground process asynchronously
-   * v2: 使用异步检测避免阻塞主线程
+   * v3: 加并发保护，同一终端同时只有一个检测在跑
    */
   private async detectForegroundProcessAsyncHandler(id: string, instance: PtyInstance): Promise<void> {
     // 关闭时跳过检测
     if (this.isShuttingDown) return
+    // 并发保护
+    if (this.detectingPids.has(id)) return
+    this.detectingPids.add(id)
 
     try {
       const ptyProcess = instance.pty
@@ -243,8 +294,8 @@ export class PtyService {
       const processInfo = await detectForegroundProcessAsync(ptyProcess.pid)
       if (processInfo) {
         instance.foregroundProcess = processInfo.name
-        instance.foregroundProcessPid = processInfo.pid  // 缓存 PID
-        this.window.webContents.send('terminal:process', {
+        instance.foregroundProcessPid = processInfo.pid
+        this.safeSend('terminal:process', {
           id,
           process: processInfo.name,
           pid: processInfo.pid,
@@ -253,6 +304,8 @@ export class PtyService {
       }
     } catch (error) {
       console.error('[PTY] Error detecting foreground process:', error)
+    } finally {
+      this.detectingPids.delete(id)
     }
   }
 
@@ -322,7 +375,7 @@ export class PtyService {
       instance.foregroundProcess = processInfo.name
       instance.foregroundProcessPid = processInfo.pid
       instance.lastPolledPid = processInfo.pid  // Phase 2: 用于下次智能跳过
-      this.window.webContents.send('terminal:process', {
+      this.safeSend('terminal:process', {
         id,
         process: processInfo.name,
         pid: processInfo.pid,
@@ -337,7 +390,7 @@ export class PtyService {
     if (cwd && cwd !== instance.cwd && this.isValidCwdPath(cwd)) {
       console.log('[PTY] CWD updated from', instance.cwd, 'to', cwd)
       instance.cwd = cwd
-      this.window.webContents.send('terminal:cwd', { id, cwd })
+      this.safeSend('terminal:cwd', { id, cwd })
     }
   }
 
@@ -481,29 +534,35 @@ export class PtyService {
   destroy(id: string): void {
     const instance = this.instances.get(id)
     if (instance) {
-      // 从轮询队列中移除（Phase 1 优化）
+      // 从轮询队列中移除
       const index = this.pollQueue.indexOf(id)
       if (index !== -1) {
         this.pollQueue.splice(index, 1)
-        // 调整当前索引，避免越界
         if (this.currentPollIndex >= index && this.currentPollIndex > 0) {
           this.currentPollIndex--
         }
       }
+
+      // 清理数据合并缓冲
+      const timer = this.dataBatchTimers.get(id)
+      if (timer) {
+        clearTimeout(timer)
+        this.dataBatchTimers.delete(id)
+      }
+      this.dataBatchBuffers.delete(id)
 
       // 如果没有终端了，停止全局轮询器
       if (this.pollQueue.length === 0) {
         this.stopGlobalPoller()
       }
 
-      // 递归终止进程树（Phase 1 优化：避免孤儿进程）
+      // 递归终止进程树
       const pid = instance.pty.pid
-      this.cleanupProcessTree(pid).catch(err => {
-        console.warn('[PTY] Failed to cleanup process tree:', err)
-      })
+      this.cleanupProcessTree(pid).catch(() => {})
 
       instance.pty.kill()
       this.instances.delete(id)
+      this.detectingPids.delete(id)
       console.log('[PTY] Terminal destroyed:', id)
     }
   }
@@ -515,6 +574,14 @@ export class PtyService {
     this.stopGlobalPoller()
     this.pollQueue = []
     this.currentPollIndex = 0
+
+    // 清理所有数据合并缓冲
+    for (const timer of this.dataBatchTimers.values()) {
+      clearTimeout(timer)
+    }
+    this.dataBatchTimers.clear()
+    this.dataBatchBuffers.clear()
+    this.detectingPids.clear()
 
     // 递归终止所有进程树（await 完成）
     const instances = Array.from(this.instances.values())

@@ -259,9 +259,15 @@ export async function detectForegroundProcessAsync(shellPid: number): Promise<Pr
     'fish.exe',
   ]);
 
+  // 限制最大检查数量，防止进程树过深时产生大量 PowerShell 调用
+  const MAX_CHECK = 10;
+  let checked = 0;
+
   for (const pid of descendantPids) {
+    if (checked >= MAX_CHECK) break;
     const name = await getProcessNameAsync(pid);
     if (name && !shellNames.has(name.toLowerCase())) {
+      checked++;
       const cwd = await getProcessCwdAsync(pid);
       return { pid, name, cwd };
     }

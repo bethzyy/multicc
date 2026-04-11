@@ -19,9 +19,13 @@ export interface SessionEntry {
 
 export class StoreService {
   private sessionsPath: string
+  private storePath: string
+  private storeCache: Map<string, unknown> | null = null
 
   constructor() {
-    this.sessionsPath = join(app.getPath('userData'), 'sessions')
+    const dataDir = app.getPath('userData')
+    this.sessionsPath = join(dataDir, 'sessions')
+    this.storePath = join(dataDir, 'store.json')
     this.ensureSessionsDir()
   }
 
@@ -33,6 +37,49 @@ export class StoreService {
 
   private getSessionPath(id: string): string {
     return join(this.sessionsPath, `${id}.json`)
+  }
+
+  /**
+   * Generic key-value get
+   */
+  get(key: string): unknown {
+    if (!this.storeCache) {
+      this.storeCache = this.loadStore()
+    }
+    return this.storeCache.get(key)
+  }
+
+  /**
+   * Generic key-value set
+   */
+  set(key: string, value: unknown): void {
+    if (!this.storeCache) {
+      this.storeCache = this.loadStore()
+    }
+    this.storeCache.set(key, value)
+    this.saveStore(this.storeCache)
+  }
+
+  private loadStore(): Map<string, unknown> {
+    try {
+      if (existsSync(this.storePath)) {
+        const data = readFileSync(this.storePath, 'utf-8')
+        const obj = JSON.parse(data)
+        return new Map(Object.entries(obj))
+      }
+    } catch (error) {
+      console.error('[Store] Failed to load store:', error)
+    }
+    return new Map()
+  }
+
+  private saveStore(store: Map<string, unknown>): void {
+    try {
+      const obj = Object.fromEntries(store)
+      writeFileSync(this.storePath, JSON.stringify(obj, null, 2))
+    } catch (error) {
+      console.error('[Store] Failed to save store:', error)
+    }
   }
 
   saveSession(session: Session): boolean {
@@ -109,6 +156,6 @@ export class StoreService {
   }
 
   private generateId(): string {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2)
+    return Date.now().toString(36) + Math.random().toString(36).substring(2)
   }
 }
