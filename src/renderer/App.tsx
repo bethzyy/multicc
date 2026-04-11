@@ -117,18 +117,19 @@ function App() {
     setFocusedId(id)
     setShowChatHistory(false)
 
-    // Wait for terminal to be created, then send resume command
-    setTimeout(() => {
-      const escapedCwd = info.cwd.replace(/([ ()&|;<>$`"'"'"'\\])/g, '\\$1')
-      const resumeCmd = info.source === 'codex'
-        ? `codex resume ${info.sessionId}`
-        : `claude --resume ${info.sessionId}`
-      window.electron.terminal.write(id, `cd ${escapedCwd} && ${resumeCmd}\n`)
-    }, 500)
+    // Wait for TerminalPane useEffect to create PTY via IPC
+    // PTY spawn is synchronous in main process; 100ms is enough for IPC round-trip + React render
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    const escapedCwd = info.cwd.replace(/([ ()&|;<>$`"'"'"'\\])/g, '\\$1')
+    const resumeCmd = info.source === 'codex'
+      ? `codex resume ${info.sessionId}`
+      : `claude --resume ${info.sessionId}`
+    window.electron.terminal.write(id, `cd ${escapedCwd} && ${resumeCmd}\n`)
   }, [])
 
   // Handle run custom command
-  const handleRunCustomCommand = useCallback((cmd: CustomCommand) => {
+  const handleRunCustomCommand = useCallback(async (cmd: CustomCommand) => {
     console.log('[App] Run custom command:', cmd)
 
     // Create new terminal
@@ -144,15 +145,16 @@ function App() {
     setFocusedId(id)
     setShowToolsBrowser(false)
 
-    // Wait for terminal to be created, then send command
-    setTimeout(() => {
-      if (cmd.cwd) {
-        const escapedCwd = cmd.cwd.replace(/([ ()&|;<>$`"'"'"'\\])/g, '\\$1')
-        window.electron.terminal.write(id, `cd ${escapedCwd} && ${cmd.command}\n`)
-      } else {
-        window.electron.terminal.write(id, `${cmd.command}\n`)
-      }
-    }, 500)
+    // Wait for TerminalPane useEffect to create PTY via IPC
+    // PTY spawn is synchronous in main process; 100ms is enough for IPC round-trip + React render
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    if (cmd.cwd) {
+      const escapedCwd = cmd.cwd.replace(/([ ()&|;<>$`"'"'"'\\])/g, '\\$1')
+      window.electron.terminal.write(id, `cd ${escapedCwd} && ${cmd.command}\n`)
+    } else {
+      window.electron.terminal.write(id, `${cmd.command}\n`)
+    }
   }, [])
 
   // Keyboard shortcut for chat history (Ctrl+H), config browser (Ctrl+Shift+S), and tools browser (Ctrl+Shift+T)

@@ -55,10 +55,6 @@ const DANGEROUS_PATTERNS = [
 ]
 
 /**
- * Safely join paths from { homedir } from 'os'
-import { join } from 'path'
-
-/**
  * Validate and normalize a user-provided path
  * Returns null if the path is invalid or attempts traversal
  */
@@ -145,9 +141,7 @@ export function isCommandAllowed(command: string): boolean {
   // Check against whitelist
   const isAllowed = ALLOWED_COMMANDS.some(
     allowed => cmdName === allowed.toLowerCase() ||
-               baseCmd.toLowerCase() === allowed.toLowerCase() ||
-               baseCmd.toLowerCase().endsWith(`\\${allowed}.exe`) ||
-               baseCmd.toLowerCase().endsWith(`/${allowed}`)
+               baseCmd.toLowerCase() === allowed.toLowerCase()
   )
 
   if (!isAllowed) {

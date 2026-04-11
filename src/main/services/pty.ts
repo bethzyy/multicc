@@ -9,7 +9,7 @@ import {
   detectCommandState,
   StateChangeDebouncer
 } from './terminal/OscParser'
-import { detectForegroundProcess, detectForegroundProcessAsync, getChildPidsAsync } from './terminal/WindowsProcessDetector'
+import { detectForegroundProcessAsync, getChildPidsAsync } from './terminal/WindowsProcessDetector'
 
 const execAsync = promisify(exec)
 
@@ -360,23 +360,6 @@ export class PtyService {
   }
 
   /**
-   * 同步版本：轻量级进程存在性检查（保留向后兼容）
-   * @deprecated 使用 isProcessRunningAsync 替代
-   */
-  private isProcessRunning(pid: number | null): boolean {
-    if (!pid) return false
-    try {
-      const result = execSync(`tasklist /fi "PID eq ${pid}" /nh`, {
-        encoding: 'utf-8',
-        timeout: 1000
-      })
-      return !result.includes('No tasks are running')
-    } catch {
-      return false
-    }
-  }
-
-  /**
    * Parse current working directory from terminal buffer
    * Looks for common Windows path patterns in prompt
    */
@@ -525,19 +508,19 @@ export class PtyService {
     }
   }
 
-  destroyAll(): void {
+  async destroyAll(): Promise<void> {
     this.isShuttingDown = true
 
-    // 停止统一轮询调度器（Phase 1 优化）
+    // 停止统一轮询调度器
     this.stopGlobalPoller()
     this.pollQueue = []
     this.currentPollIndex = 0
 
-    // 递归终止所有进程树
+    // 递归终止所有进程树（await 完成）
     const instances = Array.from(this.instances.values())
-    for (const instance of instances) {
-      this.cleanupProcessTree(instance.pty.pid).catch(() => {})
-    }
+    await Promise.all(
+      instances.map(instance => this.cleanupProcessTree(instance.pty.pid).catch(() => {}))
+    )
 
     // 再销毁所有 PTY 进程
     for (const instance of instances) {

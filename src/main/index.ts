@@ -7,10 +7,20 @@ import { registerChatHandlers } from './ipc/chat-handlers'
 import { registerConfigHandlers } from './ipc/config-handlers'
 import { registerUpdateHandlers } from './ipc/update-handlers'
 import { registerToolsHandlers } from './ipc/tools-handlers'
+import { isValidWorkingDir } from './utils/security'
 
 // 禁用 GPU 缓存警告
 app.commandLine.appendSwitch('disable-gpu-cache')
 app.commandLine.appendSwitch('disable-software-rasterizer')
+
+// H10: 全局错误处理
+process.on('uncaughtException', (error) => {
+  console.error('[Main] Uncaught exception:', error)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Main] Unhandled rejection:', reason)
+})
 
 let mainWindow: BrowserWindow | null = null
 let ptyService: PtyService
@@ -74,11 +84,27 @@ function registerIpcHandlers() {
 
   // 终端操作
   ipcMain.handle('terminal:create', (_, { id, cols, rows, cwd }) => {
+    // C2: 参数验证
+    if (!id || typeof id !== 'string') {
+      console.warn('[Main] terminal:create rejected: invalid id')
+      return false
+    }
+    if (!Number.isInteger(cols) || cols < 1 || cols > 500 ||
+        !Number.isInteger(rows) || rows < 1 || rows > 500) {
+      console.warn('[Main] terminal:create rejected: invalid cols/rows', { cols, rows })
+      return false
+    }
+    if (cwd && !isValidWorkingDir(cwd)) {
+      console.warn('[Main] terminal:create rejected: invalid cwd', { cwd })
+      return false
+    }
     console.log('[Main] terminal:create called:', { id, cols, rows, cwd })
     return ptyService.create(id, cols, rows, cwd)
   })
 
   ipcMain.on('terminal:write', (_, { id, data }) => {
+    if (!id || typeof id !== 'string' || !ptyService.hasInstance(id)) return
+    if (typeof data !== 'string') return
     ptyService.write(id, data)
   })
 
@@ -151,10 +177,13 @@ app.on('before-quit', (event) => {
     app.exit(0)
   }, 3000)
 
-  // 销毁所有终端
-  ptyService.destroyAll()
-
-  // 清除超时定时器并退出
-  clearTimeout(forceQuitTimer)
-  app.exit(0)
+  // 销毁所有终端（async，await 完成后再退出）
+  ptyService.destroyAll().then(() => {
+    clearTimeout(forceQuitTimer)
+    app.exit(0)
+  }).catch((err) => {
+    console.warn('[App] Error during cleanup:', err)
+    clearTimeout(forceQuitTimer)
+    app.exit(0)
+  })
 })

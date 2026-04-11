@@ -5,7 +5,7 @@
  * Routes: chat:get-projects, chat:get-sessions, chat:get-session, chat:search, chat:export
  */
 
-import { ipcMain, BrowserWindow, dialog } from 'electron';
+import { ipcMain, BrowserWindow, dialog, shell } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants/channels';
 import type {
   ProjectInfo,
@@ -275,7 +275,6 @@ export function registerChatHandlers(window: BrowserWindow): void {
       }
 
       // Use Windows explorer to reveal file
-      const { shell } = require('electron');
       shell.showItemInFolder(filePath);
     }
   );

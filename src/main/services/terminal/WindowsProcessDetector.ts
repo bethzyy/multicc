@@ -10,7 +10,7 @@
  * - Improved performance with parallel execution
  */
 
-import { exec, execSync, spawn } from 'child_process';
+import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
@@ -216,64 +216,7 @@ export async function getProcessCwdAsync(pid: number): Promise<string | null> {
 }
 
 /**
- * Get all descendant processes (children, grandchildren, etc.)
- */
-export function getDescendantPids(rootPid: number): number[] {
-  const allPids: number[] = [];
-  const queue: number[] = [rootPid];
-  const visited = new Set<number>();
-
-  while (queue.length > 0) {
-    const currentPid = queue.shift()!;
-    if (visited.has(currentPid)) continue;
-    visited.add(currentPid);
-
-    const children = getChildPids(currentPid);
-    for (const childPid of children) {
-      if (!visited.has(childPid)) {
-        allPids.push(childPid);
-        queue.push(childPid);
-      }
-    }
-  }
-
-  return allPids;
-}
-
-/**
- * Detect foreground process in a terminal
- * Returns the first non-shell process found among descendants
- */
-export function detectForegroundProcess(shellPid: number): ProcessInfo | null {
-  const descendantPids = getDescendantPids(shellPid);
-
-  // Known shell process names to skip
-  // Note: 'node.exe' is NOT in this list because claude and other Node.js CLIs
-  // should be detected as foreground processes
-  const shellNames = new Set([
-    'cmd.exe',
-    'powershell.exe',
-    'pwsh.exe',
-    'bash.exe',
-    'sh.exe',
-    'zsh.exe',
-    'fish.exe',
-  ]);
-
-  for (const pid of descendantPids) {
-    const name = getProcessName(pid);
-    if (name && !shellNames.has(name.toLowerCase())) {
-      const cwd = getProcessCwd(pid);
-      return { pid, name, cwd };
-    }
-  }
-
-  return null;
-}
-
-/**
  * Async version: Get all descendant processes
- * Non-blocking alternative to getDescendantPids()
  */
 export async function getDescendantPidsAsync(rootPid: number): Promise<number[]> {
   const allPids: number[] = [];

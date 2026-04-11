@@ -18,25 +18,11 @@ interface TerminalPaneProps {
   theme?: 'dark' | 'light'
 }
 
-// multicc 目录路径
-const MULTICC_DIR = 'C:/D/CAIE_tool/MyAIProduct/multicc'
-
-// 格式化路径显示：相对 multicc 目录
+// 格式化路径显示：显示最后两级
 function formatCwd(cwd: string | null): string {
   if (!cwd) return ''
 
-  // 统一使用正斜杠
   const normalizedCwd = cwd.replace(/\\/g, '/')
-  const normalizedMulticc = MULTICC_DIR.replace(/\\/g, '/')
-
-  // 如果在 multicc 目录下，显示相对路径
-  if (normalizedCwd.startsWith(normalizedMulticc)) {
-    const relative = normalizedCwd.slice(normalizedMulticc.length)
-    if (relative === '' || relative === '/') return '.'
-    return '.' + relative  // 例如: ./src/renderer
-  }
-
-  // 不在 multicc 目录下，显示最后两级
   const parts = normalizedCwd.split('/')
   const filtered = parts.filter(p => p)
   if (filtered.length <= 2) return cwd

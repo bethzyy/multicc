@@ -21,7 +21,6 @@ export function Sidebar({
   onRenameTerminal
 }: SidebarProps) {
   const [workingDirs, setWorkingDirs] = useState<string[]>([])
-  const [sessions, setSessions] = useState<unknown[]>([])
 
   // 加载工作目录
   useEffect(() => {

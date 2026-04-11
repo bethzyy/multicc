@@ -20,6 +20,7 @@ import {
   getResourceContent,
   watchConfigChanges,
 } from '../services/config/ConfigScanner';
+import { isPathAllowed, isValidWorkingDir } from '../utils/security';
 
 /** Settings file path */
 function getSettingsPath(): string {
@@ -90,6 +91,12 @@ export function registerConfigHandlers(_window: BrowserWindow): void {
   ipcMain.handle(
     IPC_CHANNELS.CONFIG.GET_RESOURCE_CONTENT,
     async (_event, resourcePath: string): Promise<ResourceContent | null> => {
+      // Validate path is within allowed directories
+      if (!isPathAllowed(resourcePath)) {
+        console.warn('[Config] getResourceContent rejected: path not allowed', resourcePath)
+        return null
+      }
+
       const content = await getResourceContent(resourcePath);
       if (content === null) {
         return null;
@@ -140,18 +147,16 @@ export function registerConfigHandlers(_window: BrowserWindow): void {
 
       // Try project level first
       if (projectPath) {
-        const projectClaudeMd = `${projectPath}/CLAUDE.md`;
-        if (require('fs').existsSync(projectClaudeMd)) {
+        const projectClaudeMd = path.join(projectPath, 'CLAUDE.md');
+        if (fs.existsSync(projectClaudeMd)) {
           claudeMdPath = projectClaudeMd;
         }
       }
 
       // Fall back to system level
       if (!claudeMdPath) {
-        const { homedir } = require('os');
-        const { join } = require('path');
-        const systemClaudeMd = join(homedir(), '.claude', 'CLAUDE.md');
-        if (require('fs').existsSync(systemClaudeMd)) {
+        const systemClaudeMd = path.join(homedir(), '.claude', 'CLAUDE.md');
+        if (fs.existsSync(systemClaudeMd)) {
           claudeMdPath = systemClaudeMd;
         }
       }
@@ -161,7 +166,7 @@ export function registerConfigHandlers(_window: BrowserWindow): void {
       }
 
       try {
-        const content = require('fs').readFileSync(claudeMdPath, 'utf-8');
+        const content = fs.readFileSync(claudeMdPath, 'utf-8');
         return { content };
       } catch (error) {
         console.error('[Config] Error reading CLAUDE.md:', error);
@@ -174,20 +179,21 @@ export function registerConfigHandlers(_window: BrowserWindow): void {
   ipcMain.handle(
     IPC_CHANNELS.CONFIG.SAVE_CLAUDE_MD,
     async (_event, content: string, projectPath?: string): Promise<{ success: boolean }> => {
-      const { homedir } = require('os');
-      const { join } = require('path');
-      const fs = require('fs');
-
       let claudeMdPath: string;
       if (projectPath) {
-        claudeMdPath = join(projectPath, 'CLAUDE.md');
+        // C3: 路径验证 — 只允许写入合法工作目录
+        if (!isValidWorkingDir(projectPath)) {
+          console.warn('[Config] save-claude-md rejected: invalid projectPath', projectPath);
+          return { success: false };
+        }
+        claudeMdPath = path.join(projectPath, 'CLAUDE.md');
       } else {
-        claudeMdPath = join(homedir(), '.claude', 'CLAUDE.md');
+        claudeMdPath = path.join(homedir(), '.claude', 'CLAUDE.md');
       }
 
       try {
         // Ensure directory exists
-        const dir = require('path').dirname(claudeMdPath);
+        const dir = path.dirname(claudeMdPath);
         if (!fs.existsSync(dir)) {
           fs.mkdirSync(dir, { recursive: true });
         }
@@ -241,7 +247,7 @@ function getResourceTypeFromPath(filePath: string): ResourceType {
   // Check if parent directory is a skill directory
   const parentDir = path.dirname(filePath);
   const skillMdPath = path.join(parentDir, 'SKILL.md');
-  if (require('fs').existsSync(skillMdPath)) {
+  if (fs.existsSync(skillMdPath)) {
     return 'skill';
   }
 
