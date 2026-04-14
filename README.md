@@ -2,6 +2,8 @@
 
 Windows 版 Claude Code 多终端管理器，基于 Electron + React + TypeScript + XTerm.js。
 
+<img src="screenshot.png" width="600" alt="MultiCC 主界面">
+
 ## 功能特性
 
 - **多终端管理**: 同时运行多个 Claude Code 实例
