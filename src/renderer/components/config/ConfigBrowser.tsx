@@ -19,6 +19,33 @@ import './ConfigBrowser.css';
 type TabType = 'skills' | 'mcp' | 'claude-md';
 type SkillViewType = 'installed' | 'marketplace';
 
+/** Marketplace detail API response structure */
+interface MarketplaceSkillDetail {
+  displayName: string;
+  summary: string | null;
+  updatedAt: number | null;
+}
+
+interface MarketplaceOwner {
+  displayName: string | null;
+}
+
+interface MarketplaceModeration {
+  verdict: string | null;
+}
+
+interface MarketplaceScanResult {
+  model: string | null;
+}
+
+interface MarketplaceDetailResponse {
+  skill: MarketplaceSkillDetail | null;
+  owner: MarketplaceOwner | null;
+  moderation: MarketplaceModeration | null;
+  skillMdContent: string | null;
+  scanResult: MarketplaceScanResult | null;
+}
+
 /** Get icon for resource type */
 function getResourceIcon(resource: ConfigResource): string {
   if (resource.type === 'skill') return '⚡';
@@ -269,7 +296,7 @@ function MarketplaceDetail({ slug, translatedContent, showTranslated }: {
   translatedContent: string | null;
   showTranslated: boolean;
 }) {
-  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [detail, setDetail] = useState<MarketplaceDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -307,35 +334,35 @@ function MarketplaceDetail({ slug, translatedContent, showTranslated }: {
 
   if (!detail) return null;
 
-  const skill = detail.skill as Record<string, unknown> | null;
-  const owner = detail.owner as Record<string, unknown> | null;
-  const moderation = detail.moderation as Record<string, unknown> | null;
-  const skillMdContent = detail.skillMdContent as string | null;
-  const scanResult = detail.scanResult as Record<string, unknown> | null;
+  const skill = detail.skill;
+  const owner = detail.owner;
+  const moderation = detail.moderation;
+  const skillMdContent = detail.skillMdContent;
+  const scanResult = detail.scanResult;
 
   return (
     <div className="resource-detail">
       <div className="resource-detail__header">
         <div className="resource-detail__title">
-          {skill?.displayName as string || slug}
+          {skill?.displayName || slug}
         </div>
         <div className="resource-detail__meta">
-          {owner?.displayName && `by ${owner.displayName as string}`}
-          {skill?.updatedAt && ` • Updated ${new Date(skill.updatedAt as number).toLocaleDateString()}`}
+          {owner?.displayName && `by ${owner.displayName}`}
+          {skill?.updatedAt && ` • Updated ${new Date(skill.updatedAt).toLocaleDateString()}`}
         </div>
       </div>
 
       {/* Security badge */}
       {moderation && (
         <div style={{ marginBottom: 12 }}>
-          <span className={`security-badge security-badge--${(moderation.verdict as string) || 'pending'}`}>
-            {(moderation.verdict as string) === 'clean' ? '✓ Clean' :
-             (moderation.verdict as string) === 'suspicious' ? '⚠ Suspicious' :
-             (moderation.verdict as string) === 'malicious' ? '✕ Malicious' : '? Unknown'}
+          <span className={`security-badge security-badge--${moderation.verdict || 'pending'}`}>
+            {moderation.verdict === 'clean' ? '✓ Clean' :
+             moderation.verdict === 'suspicious' ? '⚠ Suspicious' :
+             moderation.verdict === 'malicious' ? '✕ Malicious' : '? Unknown'}
           </span>
-          {scanResult && (scanResult.model as string) && (
+          {scanResult && scanResult?.model && (
             <span style={{ fontSize: 10, color: '#4d4d4d', marginLeft: 8 }}>
-              scanned by {scanResult.model as string}
+              scanned by {scanResult.model}
             </span>
           )}
         </div>
@@ -344,7 +371,7 @@ function MarketplaceDetail({ slug, translatedContent, showTranslated }: {
       {/* Summary */}
       {skill?.summary && (
         <div style={{ fontSize: 13, color: '#9d9d9d', marginBottom: 16 }}>
-          {skill.summary as string}
+          {skill.summary}
         </div>
       )}
 

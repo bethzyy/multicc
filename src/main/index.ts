@@ -8,7 +8,7 @@ import { registerConfigHandlers } from './ipc/config-handlers'
 import { registerUpdateHandlers } from './ipc/update-handlers'
 import { registerToolsHandlers } from './ipc/tools-handlers'
 import { registerMarketplaceHandlers } from './ipc/marketplace-handlers'
-import { isValidWorkingDir } from './utils/security'
+import { isValidWorkingDir, isUrlSafe } from './utils/security'
 
 // 禁用 GPU 缓存警告
 app.commandLine.appendSwitch('disable-gpu-cache')
@@ -54,12 +54,33 @@ function createWindow() {
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
   } else {
+    // 生产环境设置 CSP
+    mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; " +
+            "script-src 'self'; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "font-src 'self' data:; " +
+            "img-src 'self' data: https:; " +
+            "connect-src 'self' https://open.bigmodel.cn https://api.github.com; " +
+            "worker-src 'self' blob:"
+          ]
+        }
+      })
+    })
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // 外部链接用默认浏览器打开
+  // 外部链接用默认浏览器打开（校验 URL 协议）
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    if (isUrlSafe(url)) {
+      shell.openExternal(url)
+    } else {
+      console.warn('[Security] Blocked unsafe URL:', url)
+    }
     return { action: 'deny' }
   })
 }
