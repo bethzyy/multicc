@@ -40,6 +40,12 @@
   padding: 4px 8px;
 }
 
+.config-browser__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .config-browser__close:hover {
   color: #fff;
 }
@@ -81,6 +87,8 @@
   min-width: 240px;
   border-right: 1px solid #3d3d3d;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .config-browser__right {
@@ -92,6 +100,10 @@
 /* Resource List */
 .resource-list {
   padding: 8px;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .resource-list__header {
@@ -210,6 +222,35 @@
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Translate button (in header bar) */
+.translate-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid #3d3d3d;
+  border-radius: 4px;
+  color: #9d9d9d;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.translate-btn:hover:not(:disabled) {
+  background: #3d3d3d;
+  color: #e8e8e8;
+  border-color: #0078d4;
+}
+
+.translate-btn:disabled {
+  cursor: wait;
+  color: #4d4d4d;
 }
 
 /* MCP Server List */

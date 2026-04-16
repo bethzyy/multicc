@@ -224,6 +224,59 @@ export function registerConfigHandlers(_window: BrowserWindow): void {
   _window.on('closed', () => {
     unwatch();
   });
+
+  // Translate text (EN → ZH) using ZhipuAI GLM
+  ipcMain.handle(
+    IPC_CHANNELS.TRANSLATE,
+    async (_event, text: string): Promise<{ success: boolean; translated?: string; error?: string }> => {
+      if (!text || !text.trim()) {
+        return { success: false, error: 'No text to translate' };
+      }
+
+      const apiKey = process.env.ZHIPU_API_KEY;
+      if (!apiKey) {
+        return { success: false, error: 'ZHIPU_API_KEY not set' };
+      }
+
+      try {
+        const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'glm-4-flash',
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a translator. Translate the following text to Chinese (Simplified). Preserve markdown formatting, code blocks, and technical terms. Output ONLY the translated text, nothing else.',
+              },
+              { role: 'user', content: text },
+            ],
+            temperature: 0.1,
+            max_tokens: 4096,
+          }),
+          signal: AbortSignal.timeout(30000),
+        });
+
+        if (!response.ok) {
+          return { success: false, error: `API error: ${response.status}` };
+        }
+
+        const data = await response.json() as { choices: Array<{ message: { content: string } }> };
+        const translated = data.choices?.[0]?.message?.content;
+        if (!translated) {
+          return { success: false, error: 'No translation returned' };
+        }
+
+        return { success: true, translated };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { success: false, error: message };
+      }
+    }
+  );
 }
 
 /**

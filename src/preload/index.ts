@@ -172,6 +172,10 @@ const electronAPI = {
     saveClaudeMd: (content: string, projectPath?: string): Promise<{ success: boolean }> =>
       ipcRenderer.invoke('config:save-claude-md', content, projectPath),
 
+    // 翻译文本 (EN → ZH)
+    translate: (text: string): Promise<{ success: boolean; translated?: string; error?: string }> =>
+      ipcRenderer.invoke('config:translate', text),
+
     // 事件监听
     onResourceChange: (callback: (data: { type: string; path: string }) => void) => {
       const handler = (_: unknown, data: { type: string; path: string }) => callback(data)
@@ -257,6 +261,51 @@ const electronAPI = {
     // 获取自定义命令列表
     getCustomCommands: (): Promise<{ commands: CustomCommand[] }> =>
       ipcRenderer.invoke('tools:get-custom-commands')
+  },
+
+  // ClawHub Marketplace (新增)
+  marketplace: {
+    // 搜索 skills
+    search: (query: string, limit?: number): Promise<{
+      success: boolean;
+      data?: { results: Array<{ score: number; slug: string | null; displayName: string | null; summary: string | null; version: string | null; updatedAt: number | null }> };
+      error?: string;
+    }> => ipcRenderer.invoke('marketplace:search', query, limit),
+
+    // 浏览 skills（cursor 分页）
+    browse: (cursor?: string, limit?: number): Promise<{
+      success: boolean;
+      data?: { items: Array<unknown>; nextCursor: string | null };
+      error?: string;
+    }> => ipcRenderer.invoke('marketplace:browse', cursor, limit),
+
+    // 获取 skill 详情
+    detail: (slug: string): Promise<{
+      success: boolean;
+      data?: Record<string, unknown>;
+      error?: string;
+    }> => ipcRenderer.invoke('marketplace:detail', slug),
+
+    // 安装 skill
+    install: (slug: string, overwrite?: boolean): Promise<{
+      success: boolean;
+      data?: { success: boolean; path: string; error?: string; alreadyExists?: boolean };
+      error?: string;
+    }> => ipcRenderer.invoke('marketplace:install', slug, overwrite),
+
+    // 卸载 skill
+    uninstall: (skillName: string): Promise<{
+      success: boolean;
+      data?: { success: boolean; path: string; error?: string };
+      error?: string;
+    }> => ipcRenderer.invoke('marketplace:uninstall', skillName),
+
+    // 获取已安装 skills
+    installed: (): Promise<{
+      success: boolean;
+      data?: { slugs: string[] };
+      error?: string;
+    }> => ipcRenderer.invoke('marketplace:installed'),
   }
 }
 

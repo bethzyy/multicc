@@ -109,3 +109,89 @@ export const DEFAULT_SETTINGS: AppSettings = {
   maxTerminals: 20,
   shell: 'cmd.exe',
 };
+
+// ── Marketplace types (ClawHub) ──
+
+/** Skill list item from ClawHub API */
+export interface MarketplaceSkill {
+  slug: string;
+  displayName: string;
+  summary: string | null;
+  tags: Record<string, string>;
+  stats: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+  latestVersion: {
+    version: string;
+    createdAt: number;
+    changelog: string;
+  } | null;
+}
+
+/** Skill detail from ClawHub API */
+export interface SkillDetail {
+  skill: {
+    slug: string;
+    displayName: string;
+    summary: string | null;
+    tags: Record<string, string>;
+    stats: Record<string, unknown>;
+    createdAt: number;
+    updatedAt: number;
+  } | null;
+  latestVersion: {
+    version: string;
+    createdAt: number;
+    changelog: string;
+  } | null;
+  owner: {
+    handle: string | null;
+    displayName: string | null;
+    image: string | null;
+  } | null;
+  moderation: {
+    isSuspicious: boolean;
+    isMalwareBlocked: boolean;
+    verdict: 'clean' | 'suspicious' | 'malicious';
+    reasonCodes: string[];
+    summary: string | null;
+  } | null;
+}
+
+/** Search result from ClawHub API */
+export interface MarketplaceSearchResult {
+  score: number;
+  slug: string | null;
+  displayName: string | null;
+  summary: string | null;
+  version: string | null;
+  updatedAt: number | null;
+}
+
+/** Paginated list response from ClawHub API */
+export interface MarketplaceListResponse {
+  items: MarketplaceSkill[];
+  nextCursor: string | null;
+}
+
+/** Search response from ClawHub API */
+export interface MarketplaceSearchResponse {
+  results: MarketplaceSearchResult[];
+}
+
+/** Security scan result */
+export interface SecurityScanResult {
+  status: 'clean' | 'suspicious' | 'malicious' | 'pending' | 'error';
+  hasWarnings: boolean;
+  checkedAt: number | null;
+  model: string | null;
+  hasScanResult: boolean;
+}
+
+/** Install result */
+export interface InstallResult {
+  success: boolean;
+  path: string;
+  error?: string;
+  alreadyExists?: boolean;
+}

@@ -7,6 +7,7 @@ import { registerChatHandlers } from './ipc/chat-handlers'
 import { registerConfigHandlers } from './ipc/config-handlers'
 import { registerUpdateHandlers } from './ipc/update-handlers'
 import { registerToolsHandlers } from './ipc/tools-handlers'
+import { registerMarketplaceHandlers } from './ipc/marketplace-handlers'
 import { isValidWorkingDir } from './utils/security'
 
 // 禁用 GPU 缓存警告
@@ -153,6 +154,9 @@ function registerIpcHandlers() {
 
   // 配置/Skills/MCP (新增)
   registerConfigHandlers(mainWindow!)
+
+  // ClawHub Marketplace (新增)
+  registerMarketplaceHandlers()
 
   // CLI 工具管理 (新增)
   registerToolsHandlers(mainWindow!, storeService)

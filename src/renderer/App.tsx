@@ -210,6 +210,7 @@ function App() {
       {showConfigBrowser && (
         <ConfigBrowser
           onClose={() => setShowConfigBrowser(false)}
+          cwd={focusedTerminal?.cwd}
         />
       )}
 

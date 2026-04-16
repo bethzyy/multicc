@@ -9,13 +9,15 @@ import {
   StateChangeDebouncer
 } from './terminal/OscParser'
 import { detectForegroundProcessAsync, getChildPidsAsync } from './terminal/WindowsProcessDetector'
+import { OutputRateMonitor } from './terminal/OutputRateMonitor'
 
 const execAsync = promisify(exec)
 
 interface PtyInstance {
   pty: pty.IPty
   id: string
-  buffer: string
+  bufferChunks: string[]    // Array-based buffer (avoids string concat GC pressure)
+  bufferLength: number      // Tracked incrementally
   cwd: string | null
   state: 'running' | 'waiting_input' | 'busy'
   foregroundProcess: string | null
@@ -32,6 +34,18 @@ export class PtyService {
   private dataBatchBuffers: Map<string, string> = new Map()  // 数据合并缓冲
   private dataBatchTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()  // 合并定时器
   private static readonly DATA_BATCH_MS = 16  // ~60fps 合并发送
+  private static readonly MAX_BATCH_SIZE = 64 * 1024  // 64KB max per IPC flush
+
+  // 自适应输出处理（Layer 1+2）
+  private rateMonitors: Map<string, OutputRateMonitor> = new Map()
+  private oscParseBuffers: Map<string, string> = new Map()
+  private oscParseTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
+  private static readonly HEAVY_OSC_PARSE_MS = 200  // 重负载时 OSC 解析间隔
+  private static readonly MAX_OSC_BUFFER_SIZE = 500_000  // 500KB OSC 累积上限
+
+  // 进程检测节流（Layer 4）
+  private lastDetectionTime: Map<string, number> = new Map()
+  private static readonly MIN_DETECTION_INTERVAL_MS = 3000  // 最少 3 秒间隔
 
   // 统一轮询调度器（Phase 1 优化：解决 WMI 查询风暴）
   private globalPollTimer?: ReturnType<typeof setInterval>
@@ -60,21 +74,75 @@ export class PtyService {
   /**
    * 合并发送终端数据到渲染进程
    * 16ms 内的多个小 chunk 合并为一次 IPC 调用，减少渲染进程压力
+   * v2: 添加 64KB 大小上限，超限立即 flush
    */
   private batchSendData(id: string, data: string): void {
     const existing = this.dataBatchBuffers.get(id) || ''
-    this.dataBatchBuffers.set(id, existing + data)
+    const combined = existing + data
+    this.dataBatchBuffers.set(id, combined)
+
+    // 超过大小上限立即 flush
+    if (combined.length >= PtyService.MAX_BATCH_SIZE) {
+      this.flushBatch(id)
+      return
+    }
 
     if (!this.dataBatchTimers.has(id)) {
       this.dataBatchTimers.set(id, setTimeout(() => {
-        const batched = this.dataBatchBuffers.get(id)
-        this.dataBatchBuffers.delete(id)
-        this.dataBatchTimers.delete(id)
-        if (batched) {
-          this.safeSend('terminal:data', { id, data: batched })
-        }
+        this.flushBatch(id)
       }, PtyService.DATA_BATCH_MS))
     }
+  }
+
+  /**
+   * 刷新指定终端的 IPC 数据缓冲
+   */
+  private flushBatch(id: string): void {
+    const timer = this.dataBatchTimers.get(id)
+    if (timer) {
+      clearTimeout(timer)
+      this.dataBatchTimers.delete(id)
+    }
+
+    const batched = this.dataBatchBuffers.get(id)
+    this.dataBatchBuffers.delete(id)
+    if (batched) {
+      this.safeSend('terminal:data', { id, data: batched })
+    }
+  }
+
+  /**
+   * 从 buffer 数组中取尾部数据（给 parseCwdFromBuffer 用，它只需要最后几行）
+   */
+  private getBufferTail(instance: PtyInstance, maxChars: number = 5000): string {
+    const chunks = instance.bufferChunks
+    if (chunks.length === 0) return ''
+
+    let result = ''
+    for (let i = chunks.length - 1; i >= 0 && result.length < maxChars; i--) {
+      result = chunks[i] + result
+    }
+    return result
+  }
+
+  /**
+   * 裁剪 buffer 到目标大小（保留最新的数据）
+   */
+  private compactBuffer(instance: PtyInstance): void {
+    const targetSize = 50_000
+    let kept = 0
+    let cutIndex = instance.bufferChunks.length
+    for (let i = instance.bufferChunks.length - 1; i >= 0; i--) {
+      kept += instance.bufferChunks[i].length
+      if (kept >= targetSize) {
+        cutIndex = i
+        break
+      }
+    }
+    if (cutIndex > 0) {
+      instance.bufferChunks = instance.bufferChunks.slice(cutIndex)
+    }
+    instance.bufferLength = kept
   }
 
   /**
@@ -161,19 +229,53 @@ export class PtyService {
       const debouncer = new StateChangeDebouncer(50)
       this.stateDebouncers.set(id, debouncer)
 
-      // 监听输出 — 使用合并缓冲减少 IPC 压力
+      // Create rate monitor for this terminal
+      const rateMonitor = new OutputRateMonitor()
+      this.rateMonitors.set(id, rateMonitor)
+
+      // 监听输出 — 自适应处理
       ptyProcess.onData((data: string) => {
         if (this.isShuttingDown) return
         const instance = this.instances.get(id)
-        if (instance) {
-          instance.buffer += data
-          if (instance.buffer.length > 100000) {
-            instance.buffer = instance.buffer.slice(-50000)
+        if (!instance) {
+          this.batchSendData(id, data)
+          return
+        }
+
+        // --- Buffer management (array-based) ---
+        instance.bufferChunks.push(data)
+        instance.bufferLength += data.length
+        if (instance.bufferLength > 100_000) {
+          this.compactBuffer(instance)
+        }
+
+        // --- Rate monitoring ---
+        rateMonitor.recordChunk(data.length)
+
+        // --- OSC processing: adaptive ---
+        if (rateMonitor.isHeavyOutput) {
+          // 重负载模式：累积数据，定时解析
+          const buf = this.oscParseBuffers.get(id) || ''
+          const combined = buf.length + data.length > PtyService.MAX_OSC_BUFFER_SIZE
+            ? (buf + data).slice(-PtyService.MAX_OSC_BUFFER_SIZE)
+            : buf + data
+          this.oscParseBuffers.set(id, combined)
+          if (!this.oscParseTimers.has(id)) {
+            this.oscParseTimers.set(id, setTimeout(() => {
+              const accumulated = this.oscParseBuffers.get(id)
+              this.oscParseBuffers.delete(id)
+              this.oscParseTimers.delete(id)
+              if (accumulated) {
+                this.processTerminalOutput(id, accumulated, instance)
+              }
+            }, PtyService.HEAVY_OSC_PARSE_MS))
           }
-          // OSC 解析必须在每个 chunk 上执行（不能合并），用于状态检测
+        } else {
+          // 正常模式：每 chunk 解析（现有行为）
           this.processTerminalOutput(id, data, instance)
         }
-        // 数据传输走合并缓冲，减少 IPC 调用频率
+
+        // --- 数据传输走合并缓冲 ---
         this.batchSendData(id, data)
       })
 
@@ -189,7 +291,8 @@ export class PtyService {
       this.instances.set(id, {
         pty: ptyProcess,
         id,
-        buffer: '',
+        bufferChunks: [],
+        bufferLength: 0,
         cwd: workingDir,
         state: 'running',
         foregroundProcess: null,
@@ -215,7 +318,7 @@ export class PtyService {
 
   /**
    * Process terminal output for state detection
-   * v2: 单次解析 OSC 序列 + 并发保护，防止重负载下进程检测风暴
+   * v3: 进程检测添加最小间隔 + 重负载期间跳过
    */
   private processTerminalOutput(id: string, data: string, instance: PtyInstance): void {
     // 单次解析所有 OSC 序列，避免重复正则匹配
@@ -257,8 +360,15 @@ export class PtyService {
       instance.foregroundProcess = 'pending'
       this.safeSend('terminal:state', { id, state: 'busy' })
 
-      // 并发保护：同一终端同时只有一个进程检测
-      if (!this.detectingPids.has(id)) {
+      // 进程检测节流：重负载期间跳过 + 最小间隔保护
+      const monitor = this.rateMonitors.get(id)
+      const lastDetect = this.lastDetectionTime.get(id) || 0
+      const now = Date.now()
+      const tooRecent = (now - lastDetect) < PtyService.MIN_DETECTION_INTERVAL_MS
+      const heavyOutput = monitor?.isHeavyOutput ?? false
+
+      if (!this.detectingPids.has(id) && !heavyOutput && !tooRecent) {
+        this.lastDetectionTime.set(id, now)
         this.detectForegroundProcessAsyncHandler(id, instance)
       }
     }
@@ -313,24 +423,8 @@ export class PtyService {
    * Poll current working directory for a terminal
    * Uses terminal buffer parsing to detect cwd from prompt patterns
    *
-   * v4 修复：主动检测前台进程，不依赖 OSC 133 序列
-   * - cmd.exe 不支持 OSC 133，所以 commandStarted 永远不会触发
-   * - 现在在 pollCwd 中主动调用 detectForegroundProcess() 检测
-   * - 如果有前台进程（如 claude），不更新路径，保持启动子进程前的路径
-   *
-   * v5 性能优化：添加缓存机制
-   * - 如果已检测到前台进程，缓存结果，后续 poll 直接使用缓存
-   * - 只用轻量级 tasklist 检查进程是否还在运行
-   * - 进程结束后才重新进行完整检测
-   *
-   * v6 异步优化：使用异步检测避免阻塞主线程
-   * - pollCwd 改为异步方法
-   * - 使用 detectForegroundProcessAsync 替代同步版本
-   * - 使用 isProcessRunningAsync 替代同步版本
-   *
    * v7 统一轮询 + 智能跳过（Phase 1 & 2 优化）
-   * - 所有终端共享一个 5 秒定时器，每次只轮询一个
-   * - 如果上次检测的进程 PID 未变，跳过完整检测
+   * v8 使用 getBufferTail 替代整个 buffer 字符串
    */
   private async pollCwd(id: string): Promise<void> {
     // 关闭时跳过轮询，避免阻塞
@@ -385,8 +479,8 @@ export class PtyService {
       return
     }
 
-    // 没有前台进程，正常更新路径
-    const cwd = this.parseCwdFromBuffer(instance.buffer)
+    // 没有前台进程，正常更新路径 — 使用 getBufferTail 替代整个 buffer
+    const cwd = this.parseCwdFromBuffer(this.getBufferTail(instance))
     if (cwd && cwd !== instance.cwd && this.isValidCwdPath(cwd)) {
       console.log('[PTY] CWD updated from', instance.cwd, 'to', cwd)
       instance.cwd = cwd
@@ -544,12 +638,21 @@ export class PtyService {
       }
 
       // 清理数据合并缓冲
-      const timer = this.dataBatchTimers.get(id)
-      if (timer) {
-        clearTimeout(timer)
-        this.dataBatchTimers.delete(id)
+      this.flushBatch(id)
+
+      // 清理 OSC 解析缓冲
+      const oscTimer = this.oscParseTimers.get(id)
+      if (oscTimer) {
+        clearTimeout(oscTimer)
+        this.oscParseTimers.delete(id)
       }
-      this.dataBatchBuffers.delete(id)
+      this.oscParseBuffers.delete(id)
+
+      // 清理速率监控
+      this.rateMonitors.delete(id)
+
+      // 清理进程检测时间记录
+      this.lastDetectionTime.delete(id)
 
       // 如果没有终端了，停止全局轮询器
       if (this.pollQueue.length === 0) {
@@ -563,6 +666,7 @@ export class PtyService {
       instance.pty.kill()
       this.instances.delete(id)
       this.detectingPids.delete(id)
+      this.stateDebouncers.delete(id)
       console.log('[PTY] Terminal destroyed:', id)
     }
   }
@@ -581,7 +685,18 @@ export class PtyService {
     }
     this.dataBatchTimers.clear()
     this.dataBatchBuffers.clear()
+
+    // 清理所有 OSC 解析缓冲
+    for (const timer of this.oscParseTimers.values()) {
+      clearTimeout(timer)
+    }
+    this.oscParseTimers.clear()
+    this.oscParseBuffers.clear()
+
+    // 清理速率监控
+    this.rateMonitors.clear()
     this.detectingPids.clear()
+    this.lastDetectionTime.clear()
 
     // 递归终止所有进程树（await 完成）
     const instances = Array.from(this.instances.values())
@@ -595,11 +710,12 @@ export class PtyService {
     }
 
     this.instances.clear()
+    this.stateDebouncers.clear()
     console.log('[PTY] All terminals destroyed')
   }
 
   getBuffer(id: string): string {
-    return this.instances.get(id)?.buffer || ''
+    return this.instances.get(id)?.bufferChunks.join('') || ''
   }
 
   hasInstance(id: string): boolean {

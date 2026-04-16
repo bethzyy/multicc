@@ -51,6 +51,20 @@ export const IPC_CHANNELS = {
     GET_HOME_PATH: 'app:get-home-path',
   },
 
+  // Marketplace channels (ClawHub)
+  MARKETPLACE: {
+    SEARCH: 'marketplace:search',
+    BROWSE: 'marketplace:browse',
+    DETAIL: 'marketplace:detail',
+    CATEGORIES: 'marketplace:categories',
+    INSTALL: 'marketplace:install',
+    UNINSTALL: 'marketplace:uninstall',
+    INSTALLED: 'marketplace:installed',
+  },
+
+  // Translation
+  TRANSLATE: 'config:translate',
+
   // Update channels (new)
   UPDATE: {
     CHECK: 'update:check',

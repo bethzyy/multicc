@@ -1,0 +1,281 @@
+/**
+ * MarketplaceView Styles
+ *
+ * ClawHub skill marketplace browser within Skills tab.
+ */
+
+/* Sub-view toggle */
+.skill-view-toggle {
+  display: flex;
+  gap: 0;
+  padding: 0 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #3d3d3d;
+}
+
+.skill-view-toggle__btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  color: #6d6d6d;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+
+.skill-view-toggle__btn:hover {
+  color: #e8e8e8;
+}
+
+.skill-view-toggle__btn--active {
+  color: #e8e8e8;
+  border-bottom-color: #0078d4;
+}
+
+/* Marketplace search */
+.marketplace-search {
+  padding: 8px 12px;
+  border-bottom: 1px solid #3d3d3d;
+}
+
+.marketplace-search__input {
+  width: 100%;
+  padding: 6px 10px;
+  background: #2d2d2d;
+  border: 1px solid #3d3d3d;
+  border-radius: 4px;
+  color: #e8e8e8;
+  font-size: 13px;
+  outline: none;
+}
+
+.marketplace-search__input:focus {
+  border-color: #0078d4;
+}
+
+.marketplace-search__input::placeholder {
+  color: #4d4d4d;
+}
+
+/* Skill cards */
+.marketplace-list {
+  padding: 4px 8px;
+}
+
+.marketplace-card {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+
+.marketplace-card:hover {
+  background: #2d2d2d;
+}
+
+.marketplace-card--selected {
+  background: #37373d;
+}
+
+.marketplace-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.marketplace-card__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e8e8e8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.marketplace-card__version {
+  font-size: 10px;
+  color: #6d6d6d;
+  background: #2d2d2d;
+  padding: 1px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.marketplace-card__summary {
+  font-size: 11px;
+  color: #6d6d6d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 6px;
+}
+
+.marketplace-card__footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.marketplace-card__stat {
+  font-size: 10px;
+  color: #4d4d4d;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.marketplace-card__stat-icon {
+  font-size: 10px;
+}
+
+.marketplace-card__actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.marketplace-card__install-btn {
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: none;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.marketplace-card__install-btn--install {
+  background: #0078d4;
+  color: #fff;
+}
+
+.marketplace-card__install-btn--install:hover {
+  background: #006abc;
+}
+
+.marketplace-card__install-btn--installed {
+  background: #2d2d2d;
+  color: #6d6d6d;
+  cursor: default;
+}
+
+.marketplace-card__install-btn--uninstall {
+  background: #3d1a1a;
+  color: #e87474;
+  padding: 3px 8px;
+}
+
+.marketplace-card__install-btn--uninstall:hover {
+  background: #4d2020;
+}
+
+.marketplace-card__install-btn--installing {
+  background: #2d2d2d;
+  color: #6d6d6d;
+  cursor: wait;
+}
+
+/* Loading / error / empty states */
+.marketplace-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: #6d6d6d;
+}
+
+.marketplace-loading__spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #3d3d3d;
+  border-top-color: #0078d4;
+  border-radius: 50%;
+  animation: marketplace-spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+
+@keyframes marketplace-spin {
+  to { transform: rotate(360deg); }
+}
+
+.marketplace-error {
+  padding: 16px;
+  margin: 8px 12px;
+  background: #3d1a1a;
+  border-radius: 6px;
+  color: #e87474;
+  font-size: 13px;
+}
+
+.marketplace-error__retry {
+  margin-top: 8px;
+  padding: 4px 12px;
+  background: #4d2020;
+  border: none;
+  border-radius: 4px;
+  color: #e87474;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.marketplace-error__retry:hover {
+  background: #5d2828;
+}
+
+/* Load more button */
+.marketplace-load-more {
+  padding: 8px 12px;
+  text-align: center;
+}
+
+.marketplace-load-more__btn {
+  padding: 6px 16px;
+  background: #2d2d2d;
+  border: 1px solid #3d3d3d;
+  border-radius: 4px;
+  color: #9d9d9d;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.marketplace-load-more__btn:hover {
+  background: #3d3d3d;
+  color: #e8e8e8;
+}
+
+/* Security badge */
+.security-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.security-badge--clean {
+  background: #1a3d1a;
+  color: #6ee86e;
+}
+
+.security-badge--suspicious {
+  background: #3d3d1a;
+  color: #e8e86e;
+}
+
+.security-badge--malicious {
+  background: #3d1a1a;
+  color: #e86e6e;
+}
+
+.security-badge--pending {
+  background: #2d2d2d;
+  color: #6d6d6d;
+}

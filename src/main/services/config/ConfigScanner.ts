@@ -287,16 +287,33 @@ async function getClaudeMdInfo(
 export async function getResources(projectPath?: string): Promise<ConfigResource[]> {
   const resources: ConfigResource[] = [];
 
+  // If no projectPath provided, use process.cwd() as fallback
+  const effectiveProjectPath = projectPath || process.cwd();
+
   // Scan skills
-  const skills = await scanSkills(projectPath);
+  const skills = await scanSkills(effectiveProjectPath);
   resources.push(...skills);
 
+  // Also scan parent directory's .claude/skills/ (workspace-level skills)
+  const parentDir = path.dirname(effectiveProjectPath);
+  if (parentDir !== effectiveProjectPath) {
+    const parentSkills = await scanSkills(parentDir);
+    // Deduplicate by path
+    const existingPaths = new Set(resources.map(r => r.path));
+    for (const skill of parentSkills) {
+      if (!existingPaths.has(skill.path)) {
+        resources.push(skill);
+        existingPaths.add(skill.path);
+      }
+    }
+  }
+
   // Scan MCP config
-  const mcpConfigs = await scanMcpConfig(projectPath);
+  const mcpConfigs = await scanMcpConfig(effectiveProjectPath);
   resources.push(...mcpConfigs);
 
   // Scan CLAUDE.md files
-  const claudeMdFiles = await scanClaudeMd(projectPath);
+  const claudeMdFiles = await scanClaudeMd(effectiveProjectPath);
   resources.push(...claudeMdFiles);
 
   return resources;

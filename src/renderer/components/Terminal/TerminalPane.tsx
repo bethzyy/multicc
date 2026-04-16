@@ -64,8 +64,10 @@ export function TerminalPane({
       theme: getXTermTheme(theme),
       allowProposedApi: true,
       allowTransparency: true,
-      // 禁用默认的 Ctrl+C 复制行为，让我们自己处理
-      disableStdin: false
+      disableStdin: false,
+      scrollback: 5000,          // 显式限制，防止无限累积
+      fastScrollModifier: 'alt',
+      fastScrollSensitivity: 5,
     })
 
     // 配置右键菜单选项
@@ -104,9 +106,34 @@ export function TerminalPane({
     window.electron.terminal.create(terminal.id, cols, rows, terminal.cwd)
 
     // 监听终端数据（来自主进程）
+    // 使用 requestAnimationFrame 批处理写入，防止重负载时渲染器被淹没
+    let pendingData = ''
+    let rafId = 0
+    let isDisposed = false
+    const MAX_WRITE_PER_FRAME = 512 * 1024  // 512KB per frame max
+
+    const flushWrites = () => {
+      rafId = 0
+      if (pendingData && !isDisposed) {
+        // 极端压力下截断，保留最新数据
+        if (pendingData.length > MAX_WRITE_PER_FRAME) {
+          pendingData = pendingData.slice(-MAX_WRITE_PER_FRAME)
+        }
+        try {
+          xterm.write(pendingData)
+        } catch {
+          // xterm 可能已销毁
+        }
+        pendingData = ''
+      }
+    }
+
     const unsubscribe = window.electron.terminal.onData((id, data) => {
       if (id === terminal.id) {
-        xterm.write(data)
+        pendingData += data
+        if (!rafId) {
+          rafId = requestAnimationFrame(flushWrites)
+        }
       }
     })
 
@@ -224,6 +251,11 @@ export function TerminalPane({
 
     // 清理函数
     return () => {
+      // 标记已销毁，防止 rAF 回调写入已销毁的 xterm
+      isDisposed = true
+      if (rafId) {
+        cancelAnimationFrame(rafId)
+      }
       unsubscribe()
       unsubscribeExit()
       unsubscribeCwd()

@@ -2,6 +2,7 @@
  * ConfigBrowser - Two-column layout for Skills and MCP servers
  *
  * Layout: ResourceList | ResourceDetail
+ * Skills tab has sub-views: Installed (local) | Marketplace (ClawHub)
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -12,9 +13,11 @@ import type {
   McpConfigInfo,
   ClaudeMdInfo,
 } from '@shared/types/config.types';
+import { MarketplaceView } from './MarketplaceView';
 import './ConfigBrowser.css';
 
 type TabType = 'skills' | 'mcp' | 'claude-md';
+type SkillViewType = 'installed' | 'marketplace';
 
 /** Get icon for resource type */
 function getResourceIcon(resource: ConfigResource): string {
@@ -84,12 +87,14 @@ function ResourceList({
   const containerRef = useRef<HTMLDivElement>(null);
   const [listHeight, setListHeight] = useState(400);
 
-  const filteredResources = resources.filter((r) => {
-    if (filter === 'skills') return r.type === 'skill';
-    if (filter === 'mcp') return r.type === 'mcp-config';
-    if (filter === 'claude-md') return r.type === 'claude-md';
-    return true;
-  });
+  const filteredResources = resources
+    .filter((r) => {
+      if (filter === 'skills') return r.type === 'skill';
+      if (filter === 'mcp') return r.type === 'mcp-config';
+      if (filter === 'claude-md') return r.type === 'claude-md';
+      return true;
+    })
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
   // Update list height on resize
   useEffect(() => {
@@ -97,8 +102,9 @@ function ResourceList({
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        // Subtract header height (approx 40px)
-        setListHeight(entry.contentRect.height - 40);
+        // Subtract header height (approx 40px), minimum 100px
+        const height = Math.max(entry.contentRect.height - 40, 100);
+        setListHeight(height);
       }
     });
 
@@ -128,7 +134,7 @@ function ResourceList({
           {filter === 'claude-md' && 'No CLAUDE.md files found'}
         </div>
         <div className="empty-resources__hint">
-          {filter === 'skills' && 'Install skills in ~/.claude/skills/'}
+          {filter === 'skills' && 'Install skills in ~/.claude/skills/ or browse the Marketplace'}
           {filter === 'mcp' && 'Configure servers in ~/.claude/mcp.json'}
           {filter === 'claude-md' && 'Create CLAUDE.md in your project'}
         </div>
@@ -161,15 +167,19 @@ function ResourceList({
   );
 }
 
-/** Resource detail component */
+/** Detail panel for a selected local resource (skill, MCP config, CLAUDE.md) */
 function ResourceDetail({
   resource,
   content,
   loading,
+  translatedContent,
+  showTranslated,
 }: {
   resource: ConfigResource | null;
   content: ResourceContent | null;
   loading: boolean;
+  translatedContent: string | null;
+  showTranslated: boolean;
 }) {
   if (!resource) {
     return (
@@ -227,6 +237,10 @@ function ResourceDetail({
   }
 
   // Skill or CLAUDE.md with content
+  const displayContent = showTranslated && translatedContent
+    ? translatedContent
+    : content?.content || 'No content available';
+
   return (
     <div className="resource-detail">
       <div className="resource-detail__header">
@@ -243,8 +257,103 @@ function ResourceDetail({
       </div>
 
       <div className="resource-detail__content">
-        {content?.content || 'No content available'}
+        {displayContent}
       </div>
+    </div>
+  );
+}
+
+/** Marketplace detail view for a selected ClawHub skill */
+function MarketplaceDetail({ slug, translatedContent, showTranslated }: {
+  slug: string;
+  translatedContent: string | null;
+  showTranslated: boolean;
+}) {
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!slug) return;
+    setLoading(true);
+    setError('');
+    window.electron.marketplace.detail(slug)
+      .then((res) => {
+        if (res.success && res.data) {
+          setDetail(res.data);
+        } else {
+          setError(res.error || 'Failed to load skill detail');
+        }
+      })
+      .catch(() => setError('Network error'))
+      .finally(() => setLoading(false));
+  }, [slug]);
+
+  if (loading) {
+    return (
+      <div className="resource-detail">
+        <div className="resource-detail__empty"><span>Loading...</span></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="resource-detail">
+        <div className="resource-detail__empty"><span>{error}</span></div>
+      </div>
+    );
+  }
+
+  if (!detail) return null;
+
+  const skill = detail.skill as Record<string, unknown> | null;
+  const owner = detail.owner as Record<string, unknown> | null;
+  const moderation = detail.moderation as Record<string, unknown> | null;
+  const skillMdContent = detail.skillMdContent as string | null;
+  const scanResult = detail.scanResult as Record<string, unknown> | null;
+
+  return (
+    <div className="resource-detail">
+      <div className="resource-detail__header">
+        <div className="resource-detail__title">
+          {skill?.displayName as string || slug}
+        </div>
+        <div className="resource-detail__meta">
+          {owner?.displayName && `by ${owner.displayName as string}`}
+          {skill?.updatedAt && ` • Updated ${new Date(skill.updatedAt as number).toLocaleDateString()}`}
+        </div>
+      </div>
+
+      {/* Security badge */}
+      {moderation && (
+        <div style={{ marginBottom: 12 }}>
+          <span className={`security-badge security-badge--${(moderation.verdict as string) || 'pending'}`}>
+            {(moderation.verdict as string) === 'clean' ? '✓ Clean' :
+             (moderation.verdict as string) === 'suspicious' ? '⚠ Suspicious' :
+             (moderation.verdict as string) === 'malicious' ? '✕ Malicious' : '? Unknown'}
+          </span>
+          {scanResult && (scanResult.model as string) && (
+            <span style={{ fontSize: 10, color: '#4d4d4d', marginLeft: 8 }}>
+              scanned by {scanResult.model as string}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Summary */}
+      {skill?.summary && (
+        <div style={{ fontSize: 13, color: '#9d9d9d', marginBottom: 16 }}>
+          {skill.summary as string}
+        </div>
+      )}
+
+      {/* SKILL.md content */}
+      {skillMdContent && (
+        <div className="resource-detail__content">
+          {showTranslated && translatedContent ? translatedContent : skillMdContent}
+        </div>
+      )}
     </div>
   );
 }
@@ -252,26 +361,44 @@ function ResourceDetail({
 /** Main ConfigBrowser component */
 interface ConfigBrowserProps {
   onClose: () => void;
+  cwd?: string;
 }
 
-export function ConfigBrowser({ onClose }: ConfigBrowserProps) {
+export function ConfigBrowser({ onClose, cwd }: ConfigBrowserProps) {
   const [activeTab, setActiveTab] = useState<TabType>('skills');
+  const [skillView, setSkillView] = useState<SkillViewType>('marketplace');
   const [resources, setResources] = useState<ConfigResource[]>([]);
   const [selectedResource, setSelectedResource] = useState<ConfigResource | null>(null);
+  const [selectedMarketplaceSlug, setSelectedMarketplaceSlug] = useState<string | null>(null);
   const [content, setContent] = useState<ResourceContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [resourcesLoading, setResourcesLoading] = useState(true);
 
-  // Fetch resources on mount
+  // Translation state (shared by Installed + Marketplace)
+  const [translatedContent, setTranslatedContent] = useState<string | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [showTranslated, setShowTranslated] = useState(false);
+
+  // Determine what text is currently displayed (for translation source)
+  const currentText = selectedResource
+    ? content?.content || null
+    : selectedMarketplaceSlug
+      ? (document.querySelector('.resource-detail__content')?.textContent) || null
+      : null;
+
+  // Has translatable content?
+  const hasContent = !!(selectedResource && content?.content) || !!selectedMarketplaceSlug;
+
+  // Fetch resources on mount and when cwd changes
   useEffect(() => {
     setResourcesLoading(true);
-    window.electron.resources.getResources()
+    window.electron.resources.getResources(cwd)
       .then((result) => {
         setResources(result.resources || []);
       })
       .catch(console.error)
       .finally(() => setResourcesLoading(false));
-  }, []);
+  }, [cwd]);
 
   // Fetch content when resource is selected
   useEffect(() => {
@@ -291,15 +418,77 @@ export function ConfigBrowser({ onClose }: ConfigBrowserProps) {
 
   const handleSelectResource = useCallback((resource: ConfigResource) => {
     setSelectedResource(resource);
+    setSelectedMarketplaceSlug(null);
+    // Reset translation on selection change
+    setTranslatedContent(null);
+    setShowTranslated(false);
   }, []);
+
+  const handleSelectMarketplaceSkill = useCallback((slug: string) => {
+    setSelectedMarketplaceSlug(slug);
+    setSelectedResource(null);
+    // Reset translation on selection change
+    setTranslatedContent(null);
+    setShowTranslated(false);
+  }, []);
+
+  // Translate handler
+  const handleTranslate = useCallback(async () => {
+    // Toggle if already translated
+    if (translatedContent) {
+      setShowTranslated(!showTranslated);
+      return;
+    }
+
+    // Get the text to translate
+    let textToTranslate: string | null = null;
+    if (selectedResource) {
+      textToTranslate = content?.content || null;
+    }
+    // For marketplace, we need to wait for detail to load, then translate skillMdContent
+    // We'll grab it from the detail element or use a ref approach
+    if (!textToTranslate) {
+      const detailEl = document.querySelector('.resource-detail__content');
+      textToTranslate = detailEl?.textContent || null;
+    }
+
+    if (!textToTranslate) return;
+
+    setTranslating(true);
+    try {
+      const result = await window.electron.resources.translate(textToTranslate);
+      if (result.success && result.translated) {
+        setTranslatedContent(result.translated);
+        setShowTranslated(true);
+      } else {
+        console.error('[ConfigBrowser] Translation failed:', result.error);
+      }
+    } catch (err) {
+      console.error('[ConfigBrowser] Translation error:', err);
+    } finally {
+      setTranslating(false);
+    }
+  }, [selectedResource, content, selectedMarketplaceSlug, translatedContent, showTranslated]);
 
   return (
     <div className="config-browser">
       <div className="config-browser__header">
         <span className="config-browser__title">Skills & MCP</span>
-        <button className="config-browser__close" onClick={onClose}>
-          &times;
-        </button>
+        <div className="config-browser__header-actions">
+          {hasContent && (
+            <button
+              className="translate-btn"
+              onClick={handleTranslate}
+              disabled={translating}
+              title={showTranslated ? 'Show original' : 'Translate to Chinese'}
+            >
+              {translating ? '...' : showTranslated ? 'EN' : '中'}
+            </button>
+          )}
+          <button className="config-browser__close" onClick={onClose}>
+            &times;
+          </button>
+        </div>
       </div>
 
       <div className="config-browser__tabs">
@@ -325,26 +514,95 @@ export function ConfigBrowser({ onClose }: ConfigBrowserProps) {
 
       <div className="config-browser__content">
         <div className="config-browser__left">
-          {resourcesLoading ? (
-            <div className="empty-resources">
-              <div className="empty-resources__text">Loading...</div>
-            </div>
-          ) : (
-            <ResourceList
-              resources={resources}
-              selectedPath={selectedResource?.path || null}
-              onSelect={handleSelectResource}
-              filter={activeTab}
-            />
+          {/* Skills tab: sub-view toggle + content */}
+          {activeTab === 'skills' && (
+            <>
+              <div className="skill-view-toggle">
+                <button
+                  className={`skill-view-toggle__btn ${skillView === 'installed' ? 'skill-view-toggle__btn--active' : ''}`}
+                  onClick={() => setSkillView('installed')}
+                >
+                  Installed
+                </button>
+                <button
+                  className={`skill-view-toggle__btn ${skillView === 'marketplace' ? 'skill-view-toggle__btn--active' : ''}`}
+                  onClick={() => setSkillView('marketplace')}
+                >
+                  🏪 Marketplace
+                </button>
+              </div>
+
+              {skillView === 'installed' ? (
+                resourcesLoading ? (
+                  <div className="empty-resources">
+                    <div className="empty-resources__text">Loading...</div>
+                  </div>
+                ) : (
+                  <ResourceList
+                    resources={resources}
+                    selectedPath={selectedResource?.path || null}
+                    onSelect={handleSelectResource}
+                    filter="skills"
+                  />
+                )
+              ) : (
+                <MarketplaceView
+                  selectedSlug={selectedMarketplaceSlug}
+                  onSelectSkill={handleSelectMarketplaceSkill}
+                />
+              )}
+            </>
+          )}
+
+          {/* MCP tab */}
+          {activeTab === 'mcp' && (
+            resourcesLoading ? (
+              <div className="empty-resources">
+                <div className="empty-resources__text">Loading...</div>
+              </div>
+            ) : (
+              <ResourceList
+                resources={resources}
+                selectedPath={selectedResource?.path || null}
+                onSelect={handleSelectResource}
+                filter="mcp"
+              />
+            )
+          )}
+
+          {/* CLAUDE.md tab */}
+          {activeTab === 'claude-md' && (
+            resourcesLoading ? (
+              <div className="empty-resources">
+                <div className="empty-resources__text">Loading...</div>
+              </div>
+            ) : (
+              <ResourceList
+                resources={resources}
+                selectedPath={selectedResource?.path || null}
+                onSelect={handleSelectResource}
+                filter="claude-md"
+              />
+            )
           )}
         </div>
 
         <div className="config-browser__right">
-          <ResourceDetail
-            resource={selectedResource}
-            content={content}
-            loading={loading}
-          />
+          {selectedMarketplaceSlug ? (
+            <MarketplaceDetail
+              slug={selectedMarketplaceSlug}
+              translatedContent={translatedContent}
+              showTranslated={showTranslated}
+            />
+          ) : (
+            <ResourceDetail
+              resource={selectedResource}
+              content={content}
+              loading={loading}
+              translatedContent={translatedContent}
+              showTranslated={showTranslated}
+            />
+          )}
         </div>
       </div>
     </div>

@@ -95,6 +95,20 @@ export function isPathAllowed(filePath: string): boolean {
     const normalizedBase = resolve(baseDir)
     return resolved.startsWith(normalizedBase + sep) || resolved === normalizedBase
   })
+    // Also allow paths under any .claude/skills/ directory (project-level skills)
+    || isProjectLevelClaudePath(resolved)
+}
+
+/**
+ * Check if a path is under a project-level .claude directory
+ * (e.g., C:\Projects\myapp\.claude\skills\...)
+ */
+function isProjectLevelClaudePath(resolved: string): boolean {
+  // Match paths containing .claude/skills or .claude/mcp.json or .claude/CLAUDE.md
+  const normalized = resolved.replace(/\\/g, '/')
+  return /\.claude\/(skills|mcp\.json|CLAUDE\.md)/.test(normalized)
+    || normalized.endsWith('.claude/skills')
+    || /\.claude\/skills\//.test(normalized)
 }
 
 /**
