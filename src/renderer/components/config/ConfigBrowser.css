@@ -215,13 +215,7 @@
   background: #252526;
   border-radius: 6px;
   padding: 16px;
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #d4d4d4;
   overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 /* Translate button (in header bar) */

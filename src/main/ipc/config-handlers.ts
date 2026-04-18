@@ -7,6 +7,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { ipcMain, BrowserWindow } from 'electron';
 import { homedir } from 'os';
 import { IPC_CHANNELS } from '@shared/constants/channels';
@@ -21,6 +22,7 @@ import {
   watchConfigChanges,
 } from '../services/config/ConfigScanner';
 import { isPathAllowed, isValidWorkingDir } from '../utils/security';
+import type { StoreService } from '../services/store';
 
 /** Settings file path */
 function getSettingsPath(): string {
@@ -74,10 +76,15 @@ function saveSettings(settings: Record<string, unknown>): boolean {
   }
 }
 
+/** Compute SHA-256 hash for translation cache key */
+function contentHash(text: string): string {
+  return crypto.createHash('sha256').update(text).digest('hex');
+}
+
 /**
  * Register all config IPC handlers
  */
-export function registerConfigHandlers(_window: BrowserWindow): void {
+export function registerConfigHandlers(_window: BrowserWindow, storeService: StoreService): void {
   // Get all config resources
   ipcMain.handle(
     IPC_CHANNELS.CONFIG.GET_RESOURCES,
@@ -225,7 +232,7 @@ export function registerConfigHandlers(_window: BrowserWindow): void {
     unwatch();
   });
 
-  // Translate text (EN → ZH) using ZhipuAI GLM
+  // Translate text (EN → ZH) using ZhipuAI GLM, with persistent cache
   ipcMain.handle(
     IPC_CHANNELS.TRANSLATE,
     async (_event, text: string): Promise<{ success: boolean; translated?: string; error?: string }> => {
@@ -233,8 +240,22 @@ export function registerConfigHandlers(_window: BrowserWindow): void {
         return { success: false, error: 'No text to translate' };
       }
 
+      // Check cache first
+      const hash = contentHash(text);
+      const cacheKey = `translate:${hash}`;
+      try {
+        const cached = storeService.get(cacheKey) as { translated: string; timestamp: number } | undefined;
+        if (cached?.translated) {
+          console.log('[Translate] Cache hit:', hash.substring(0, 12));
+          return { success: true, translated: cached.translated };
+        }
+      } catch {
+        // Cache read failure is non-fatal
+      }
+
       const apiKey = process.env.ZHIPU_API_KEY;
       if (!apiKey) {
+        console.error('[Translate] ZHIPU_API_KEY not found in env');
         return { success: false, error: 'ZHIPU_API_KEY not set' };
       }
 
@@ -255,24 +276,36 @@ export function registerConfigHandlers(_window: BrowserWindow): void {
               { role: 'user', content: text },
             ],
             temperature: 0.1,
-            max_tokens: 4096,
+            max_tokens: 8192,
           }),
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.timeout(120000),
         });
 
         if (!response.ok) {
+          console.error('[Translate] API error:', response.status);
           return { success: false, error: `API error: ${response.status}` };
         }
 
         const data = await response.json() as { choices: Array<{ message: { content: string } }> };
         const translated = data.choices?.[0]?.message?.content;
+
         if (!translated) {
+          console.error('[Translate] No translation returned');
           return { success: false, error: 'No translation returned' };
+        }
+
+        // Save to cache
+        try {
+          storeService.set(cacheKey, { original: text, translated, timestamp: Date.now() });
+          console.log('[Translate] Cached:', hash.substring(0, 12), 'length:', translated.length);
+        } catch {
+          // Cache write failure is non-fatal
         }
 
         return { success: true, translated };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        console.error('[Translate] Exception:', message);
         return { success: false, error: message };
       }
     }

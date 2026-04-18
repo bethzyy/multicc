@@ -129,7 +129,8 @@ Renderer Process                              Main Process
 - **聚焦模式**: 不卸载组件，用 CSS `display: none` 控制显隐
 
 **ChatHistoryPanel** — 会话历史浏览、搜索、恢复
-**ConfigBrowser** — Skills/MCP/CLAUDE.md 配置浏览 + EN→ZH 翻译切换（ZhipuAI GLM-4-flash）
+**ConfigBrowser** — Skills/MCP/CLAUDE.md 配置浏览 + EN→ZH 翻译切换（ZhipuAI GLM-4-flash）+ 翻译缓存（SHA-256 hash, StoreService 持久化）
+**MarkdownContent** (`src/renderer/components/shared/MarkdownContent.tsx`) — react-markdown + remark-gfm 暗色主题渲染组件
 **MarketplaceView** — ClawHub Skill 市场（搜索/浏览/安装/卸载）
 **ToolsBrowser** — CLI 工具检测 + 自定义命令管理
 **UpdateNotification** — 自动更新提示和进度

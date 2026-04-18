@@ -14,6 +14,8 @@ import type {
   ClaudeMdInfo,
 } from '@shared/types/config.types';
 import { MarketplaceView } from './MarketplaceView';
+import { MarkdownContent } from '../shared/MarkdownContent';
+import { useToast } from '../shared/ToastContext';
 import './ConfigBrowser.css';
 
 type TabType = 'skills' | 'mcp' | 'claude-md';
@@ -284,17 +286,18 @@ function ResourceDetail({
       </div>
 
       <div className="resource-detail__content">
-        {displayContent}
+        <MarkdownContent content={displayContent} />
       </div>
     </div>
   );
 }
 
 /** Marketplace detail view for a selected ClawHub skill */
-function MarketplaceDetail({ slug, translatedContent, showTranslated }: {
+function MarketplaceDetail({ slug, translatedContent, showTranslated, onContentLoaded }: {
   slug: string;
   translatedContent: string | null;
   showTranslated: boolean;
+  onContentLoaded?: (content: string) => void;
 }) {
   const [detail, setDetail] = useState<MarketplaceDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -308,6 +311,10 @@ function MarketplaceDetail({ slug, translatedContent, showTranslated }: {
       .then((res) => {
         if (res.success && res.data) {
           setDetail(res.data);
+          // Lift raw content to parent for translation
+          if (res.data.skillMdContent) {
+            onContentLoaded?.(res.data.skillMdContent);
+          }
         } else {
           setError(res.error || 'Failed to load skill detail');
         }
@@ -378,7 +385,7 @@ function MarketplaceDetail({ slug, translatedContent, showTranslated }: {
       {/* SKILL.md content */}
       {skillMdContent && (
         <div className="resource-detail__content">
-          {showTranslated && translatedContent ? translatedContent : skillMdContent}
+          <MarkdownContent content={showTranslated && translatedContent ? translatedContent : skillMdContent} />
         </div>
       )}
     </div>
@@ -400,17 +407,21 @@ export function ConfigBrowser({ onClose, cwd }: ConfigBrowserProps) {
   const [content, setContent] = useState<ResourceContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [resourcesLoading, setResourcesLoading] = useState(true);
+  const [marketplaceContent, setMarketplaceContent] = useState<string | null>(null);
 
   // Translation state (shared by Installed + Marketplace)
   const [translatedContent, setTranslatedContent] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
   const [showTranslated, setShowTranslated] = useState(false);
+  const [translateError, setTranslateError] = useState<string | null>(null);
+
+  const { showToast } = useToast();
 
   // Determine what text is currently displayed (for translation source)
   const currentText = selectedResource
     ? content?.content || null
     : selectedMarketplaceSlug
-      ? (document.querySelector('.resource-detail__content')?.textContent) || null
+      ? marketplaceContent
       : null;
 
   // Has translatable content?
@@ -449,53 +460,69 @@ export function ConfigBrowser({ onClose, cwd }: ConfigBrowserProps) {
     // Reset translation on selection change
     setTranslatedContent(null);
     setShowTranslated(false);
+    setTranslateError(null);
   }, []);
 
   const handleSelectMarketplaceSkill = useCallback((slug: string) => {
     setSelectedMarketplaceSlug(slug);
     setSelectedResource(null);
-    // Reset translation on selection change
+    // Reset translation and marketplace content on selection change
     setTranslatedContent(null);
     setShowTranslated(false);
+    setMarketplaceContent(null);
+    setTranslateError(null);
   }, []);
 
   // Translate handler
   const handleTranslate = useCallback(async () => {
+    setTranslateError(null);
+
     // Toggle if already translated
     if (translatedContent) {
       setShowTranslated(!showTranslated);
       return;
     }
 
-    // Get the text to translate
+    // Get the text to translate from React state (not DOM)
     let textToTranslate: string | null = null;
     if (selectedResource) {
       textToTranslate = content?.content || null;
-    }
-    // For marketplace, we need to wait for detail to load, then translate skillMdContent
-    // We'll grab it from the detail element or use a ref approach
-    if (!textToTranslate) {
-      const detailEl = document.querySelector('.resource-detail__content');
-      textToTranslate = detailEl?.textContent || null;
+    } else if (selectedMarketplaceSlug) {
+      textToTranslate = marketplaceContent;
     }
 
-    if (!textToTranslate) return;
+    if (!textToTranslate) {
+      setTranslateError('没有可翻译的内容');
+      return;
+    }
 
     setTranslating(true);
     try {
       const result = await window.electron.resources.translate(textToTranslate);
+
       if (result.success && result.translated) {
         setTranslatedContent(result.translated);
         setShowTranslated(true);
+        setTranslateError(null);
       } else {
-        console.error('[ConfigBrowser] Translation failed:', result.error);
+        const errorMsg = result.error || 'Unknown error';
+        console.error('[ConfigBrowser] Translation failed:', errorMsg);
+        setTranslateError(errorMsg);
+        if (errorMsg.includes('ZHIPU_API_KEY')) {
+          showToast('请设置 ZHIPU_API_KEY 环境变量', 'error');
+        } else {
+          showToast('翻译失败: ' + errorMsg, 'error');
+        }
       }
     } catch (err) {
-      console.error('[ConfigBrowser] Translation error:', err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error('[ConfigBrowser] Translation error:', errMsg);
+      setTranslateError(errMsg);
+      showToast('翻译出错，请检查网络连接', 'error');
     } finally {
       setTranslating(false);
     }
-  }, [selectedResource, content, selectedMarketplaceSlug, translatedContent, showTranslated]);
+  }, [selectedResource, content, selectedMarketplaceSlug, marketplaceContent, translatedContent, showTranslated, showToast]);
 
   return (
     <div className="config-browser">
@@ -511,6 +538,11 @@ export function ConfigBrowser({ onClose, cwd }: ConfigBrowserProps) {
             >
               {translating ? '...' : showTranslated ? 'EN' : '中'}
             </button>
+          )}
+          {translateError && (
+            <span style={{ fontSize: 11, color: '#f44336', maxWidth: 200 }} title={translateError}>
+              {translateError.substring(0, 30)}
+            </span>
           )}
           <button className="config-browser__close" onClick={onClose}>
             &times;
@@ -620,6 +652,7 @@ export function ConfigBrowser({ onClose, cwd }: ConfigBrowserProps) {
               slug={selectedMarketplaceSlug}
               translatedContent={translatedContent}
               showTranslated={showTranslated}
+              onContentLoaded={setMarketplaceContent}
             />
           ) : (
             <ResourceDetail

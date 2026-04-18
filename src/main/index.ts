@@ -174,7 +174,7 @@ function registerIpcHandlers() {
   registerChatHandlers(mainWindow!)
 
   // 配置/Skills/MCP (新增)
-  registerConfigHandlers(mainWindow!)
+  registerConfigHandlers(mainWindow!, storeService)
 
   // ClawHub Marketplace (新增)
   registerMarketplaceHandlers()
