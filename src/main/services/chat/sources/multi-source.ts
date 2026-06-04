@@ -143,7 +143,7 @@ export async function searchAllSources(
     snippet: string;
     timestamp: string;
     source: ChatSource;
-  }>> = [];
+  }> = [];
 
   // Search in parallel
   const [claudeResults, codexResults, geminiResults] = await Promise.allSettled([

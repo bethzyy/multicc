@@ -142,7 +142,7 @@ window.electron.terminal.create(id, cols, rows, cwd)
 window.electron.terminal.write(id, data)
 window.electron.terminal.resize(id, cols, rows)
 window.electron.terminal.destroy(id)
-window.electron.terminal.onData / onExit / onCwd(callback)
+window.electron.terminal.onData(id, callback) / onExit(id, callback) / onCwd(id, callback)  // 按终端 id 订阅专属通道
 
 // 配置管理
 window.electron.config.getClaudePath() / setClaudePath(path)

@@ -42,22 +42,26 @@ const electronAPI = {
     destroy: (id: string) =>
       ipcRenderer.invoke('terminal:destroy', { id }),
 
-    onData: (callback: (id: string, data: string) => void) => {
-      const handler = (_: unknown, { id, data }: { id: string; data: string }) => callback(id, data)
-      ipcRenderer.on('terminal:data', handler)
-      return () => ipcRenderer.removeListener('terminal:data', handler)
+    // per-terminal 通道：每个终端只订阅自己的 channel，避免 O(N) 扇出
+    onData: (id: string, callback: (data: string) => void) => {
+      const channel = `terminal:data:${id}`
+      const handler = (_: unknown, data: string) => callback(data)
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
     },
 
-    onExit: (callback: (id: string, exitCode: number) => void) => {
-      const handler = (_: unknown, { id, exitCode }: { id: string; exitCode: number }) => callback(id, exitCode)
-      ipcRenderer.on('terminal:exit', handler)
-      return () => ipcRenderer.removeListener('terminal:exit', handler)
+    onExit: (id: string, callback: (info: { exitCode: number; signal?: number }) => void) => {
+      const channel = `terminal:exit:${id}`
+      const handler = (_: unknown, info: { exitCode: number; signal?: number }) => callback(info)
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
     },
 
-    onCwd: (callback: (id: string, cwd: string) => void) => {
-      const handler = (_: unknown, { id, cwd }: { id: string; cwd: string }) => callback(id, cwd)
-      ipcRenderer.on('terminal:cwd', handler)
-      return () => ipcRenderer.removeListener('terminal:cwd', handler)
+    onCwd: (id: string, callback: (cwd: string) => void) => {
+      const channel = `terminal:cwd:${id}`
+      const handler = (_: unknown, cwd: string) => callback(cwd)
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
     }
   },
 

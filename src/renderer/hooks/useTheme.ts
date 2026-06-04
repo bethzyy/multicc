@@ -31,7 +31,8 @@ export function useTheme() {
   return { theme, setTheme, toggleTheme }
 }
 
-// 获取 XTerm 主题配置
+// 只返回容器级配色（背景/前景/光标/选区），不覆盖 ANSI 16 色调色板，
+// 让 xterm.js 用自带默认调色板，保留 Claude Code 等子进程输出的原始颜色。
 export function getXTermTheme(theme: Theme) {
   if (theme === 'light') {
     return {
@@ -39,23 +40,7 @@ export function getXTermTheme(theme: Theme) {
       foreground: '#333333',
       cursor: '#333333',
       cursorAccent: '#ffffff',
-      selection: 'rgba(0, 0, 0, 0.2)',
-      black: '#000000',
-      red: '#cd3131',
-      green: '#00bc00',
-      yellow: '#949800',
-      blue: '#0451a5',
-      magenta: '#bc05bc',
-      cyan: '#0598bc',
-      white: '#555555',
-      brightBlack: '#666666',
-      brightRed: '#cd3131',
-      brightGreen: '#14ce14',
-      brightYellow: '#b5ba00',
-      brightBlue: '#0451a5',
-      brightMagenta: '#bc05bc',
-      brightCyan: '#0598bc',
-      brightWhite: '#a5a5a5'
+      selection: 'rgba(0, 0, 0, 0.2)'
     }
   }
 
@@ -65,22 +50,6 @@ export function getXTermTheme(theme: Theme) {
     foreground: '#d4d4d4',
     cursor: '#ffffff',
     cursorAccent: '#1e1e1e',
-    selection: 'rgba(255, 255, 255, 0.3)',
-    black: '#000000',
-    red: '#cd3131',
-    green: '#0dbc79',
-    yellow: '#e5e510',
-    blue: '#2472c8',
-    magenta: '#bc3fbc',
-    cyan: '#11a8cd',
-    white: '#e5e5e5',
-    brightBlack: '#666666',
-    brightRed: '#f14c4c',
-    brightGreen: '#23d18b',
-    brightYellow: '#f5f543',
-    brightBlue: '#3b8eea',
-    brightMagenta: '#d670d6',
-    brightCyan: '#29b8db',
-    brightWhite: '#ffffff'
+    selection: 'rgba(255, 255, 255, 0.3)'
   }
 }
