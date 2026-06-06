@@ -20,6 +20,7 @@ import type {
   CustomCommand,
   ToolsConfig,
 } from './tools.types';
+import type { WorktreeInfo } from './worktree.types';
 
 declare global {
   interface Window {
@@ -41,6 +42,7 @@ declare global {
         onData: (id: string, callback: (data: string) => void) => () => void;
         onExit: (id: string, callback: (info: { exitCode: number; signal?: number }) => void) => () => void;
         onCwd: (id: string, callback: (cwd: string) => void) => () => void;
+        onState: (id: string, callback: (state: string) => void) => () => void;
       };
 
       // Config management (legacy)
@@ -145,6 +147,19 @@ declare global {
         removeCustomCommand: (id: string) => Promise<{ success: boolean; commands: CustomCommand[] }>;
         updateCustomCommand: (command: CustomCommand) => Promise<{ success: boolean; commands: CustomCommand[] }>;
         getCustomCommands: () => Promise<{ commands: CustomCommand[] }>;
+      };
+
+      // Git Worktree management
+      worktree: {
+        detectRepo: (cwd: string) => Promise<{ isRepo: boolean; repoPath?: string; branch?: string }>;
+        list: (repoPath: string) => Promise<WorktreeInfo[]>;
+        create: (repoPath: string) => Promise<{ success: boolean; worktreePath?: string; branch?: string; error?: string }>;
+        rename: (worktreePath: string, newBranch: string) => Promise<{ success: boolean; error?: string }>;
+        remove: (worktreePath: string, force?: boolean) => Promise<{ success: boolean; error?: string }>;
+      };
+
+      shell: {
+        openPath: (path: string) => Promise<string>;
       };
     };
   }

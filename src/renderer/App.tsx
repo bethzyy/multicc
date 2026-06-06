@@ -15,6 +15,7 @@ export interface TerminalInstance {
   name: string
   cwd: string
   isFocused: boolean
+  state?: 'running' | 'waiting_input' | 'busy' | 'idle'
 }
 
 function App() {
@@ -34,7 +35,8 @@ function App() {
       id,
       name: `终端 ${terminals.length + 1}`,
       cwd: cwd || '',
-      isFocused: true
+      isFocused: true,
+      state: 'running'
     }
     console.log('[App] new terminal:', terminal)
     setTerminals(prev => [...prev, terminal])
@@ -89,7 +91,44 @@ function App() {
     setTerminals(prev =>
       prev.map(t => t.id === id ? { ...t, name } : t)
     )
+
+    // If terminal is in a worktree, sync rename to git branch
+    if (name) {
+      const terminal = terminals.find(t => t.id === id)
+      const cwd = terminal?.cwd || ''
+      if (cwd.includes('/.worktrees/') || cwd.includes('\\.worktrees\\')) {
+        const branchName = name
+          .replace(/\s+/g, '-')
+          .replace(/[~^:?*[\]\\]/g, '')
+          .replace(/\.{2,}/g, '.')
+          .replace(/\.lock$/i, '')
+          .replace(/^-+|-+$/g, '')
+        if (branchName) {
+          window.electron.worktree.rename(cwd, branchName)
+            .catch((e: unknown) => console.warn('[worktree] rename failed:', e))
+        }
+      }
+    }
+  }, [terminals])
+
+  // 终端状态变化
+  const handleTerminalStateChange = useCallback((id: string, state: string) => {
+    setTerminals(prev =>
+      prev.map(t => t.id === id ? { ...t, state: state as TerminalInstance['state'] } : t)
+    )
   }, [])
+
+  // 终端 cwd 变化
+  const handleTerminalCwdChange = useCallback((id: string, cwd: string) => {
+    setTerminals(prev =>
+      prev.map(t => t.id === id ? { ...t, cwd } : t)
+    )
+  }, [])
+
+  // 在 worktree 路径创建新终端
+  const openWorktreeTerminal = useCallback((path: string) => {
+    createTerminal(path)
+  }, [createTerminal])
 
   // 初始化：创建第一个终端
   useEffect(() => {
@@ -235,6 +274,9 @@ function App() {
             onCloseTerminal={closeTerminal}
             onRenameTerminal={renameTerminal}
             onFocusTerminal={focusTerminal}
+            onTerminalStateChange={handleTerminalStateChange}
+            onTerminalCwdChange={handleTerminalCwdChange}
+            onOpenWorktree={openWorktreeTerminal}
             focusMode={focusMode}
             onToggleFocusModeForTerminal={toggleFocusModeForTerminal}
             theme={theme}

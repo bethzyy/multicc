@@ -77,4 +77,13 @@ export const IPC_CHANNELS = {
     DOWNLOADED: 'update:downloaded',
     ERROR: 'update:error',
   },
+
+  // Worktree channels
+  WORKTREE: {
+    DETECT_REPO: 'worktree:detect-repo',
+    LIST: 'worktree:list',
+    CREATE: 'worktree:create',
+    RENAME: 'worktree:rename',
+    REMOVE: 'worktree:remove',
+  },
 } as const;

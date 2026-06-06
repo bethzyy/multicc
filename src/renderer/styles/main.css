@@ -387,6 +387,44 @@ body {
   margin-right: 6px;
 }
 
+/* 终端状态圆点 (红绿灯) — 参考 muxvo TileEffects.css */
+.terminal-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background-color 150ms ease;
+}
+.terminal-status-dot.running { background: #4ade80; box-shadow: 0 0 6px #4ade80; animation: statusPulse 2s ease-in-out infinite; }
+.terminal-status-dot.waiting { background: #ef4444; box-shadow: 0 0 10px #ef4444, 0 0 20px rgba(239, 68, 68, 0.4); animation: statusPulse 1s ease-in-out infinite; }
+.terminal-status-dot.idle { background: #555; }
+
+.terminal-waiting-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 50%;
+  background: #ef4444;
+  color: #fff;
+  margin-right: 4px;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+  animation: badgePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% { box-shadow: 0 0 6px currentColor; }
+  50% { box-shadow: 0 0 12px currentColor, 0 0 24px currentColor; }
+}
+
+@keyframes badgePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 .terminal-separator {
   margin: 0 6px;
   color: var(--text-secondary);
@@ -435,6 +473,61 @@ body {
 .terminal-action-btn:hover {
   background-color: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.terminal-action-btn.worktree-btn {
+  font-size: 13px;
+  position: relative;
+}
+.terminal-action-btn.worktree-btn:hover {
+  color: var(--accent-color);
+}
+
+/* 文件浏览器按钮 */
+.terminal-action-btn.file-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.terminal-action-btn.file-btn:hover {
+  color: var(--accent-color);
+}
+
+/* Worktree 项目徽章 */
+.terminal-worktree-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(166, 227, 161, 0.15);
+  color: #a6e3a1;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+
+/* WaitingInput 红色 "1" 徽章 */
+.terminal-waiting-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f38ba8;
+  color: #1e1e2e;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  margin-right: 4px;
+  animation: terminal-badge-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes terminal-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 /* 关闭按钮样式 - 使用 !important 强制覆盖 */

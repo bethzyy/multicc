@@ -6,7 +6,10 @@ import { promisify } from 'util'
 import {
   parseOscSequences,
   extractLatestCwd,
-  StateChangeDebouncer
+  StateChangeDebouncer,
+  detectBellSignal,
+  detectWaitingInput,
+  resetInputDetector
 } from './terminal/OscParser'
 import { detectForegroundProcessAsync, getChildPidsAsync } from './terminal/WindowsProcessDetector'
 import { OutputRateMonitor } from './terminal/OutputRateMonitor'
@@ -312,10 +315,13 @@ export class PtyService {
         // 这里据此跳过，避免二次清理与多余的 terminal:exit。仅处理"进程自发退出"。
         if (!this.instances.has(id)) return
         console.log('[PTY] Process exited:', id, 'code:', exitCode, 'signal:', signal)
+        // 发送 idle 状态（让前端显示灰色灯）。退出是终态，不需要防抖，直接发送。
+        this.safeSend('terminal:state', { id, state: 'idle' })
         // 进程自然退出：先 cleanupTerminalResources（内含 flushBatch，把退出前最后一行
         // 输出发给渲染端）再发 exit，保证最后输出先于「终端已关闭」显示。此处不杀进程（已自行退出）。
         this.cleanupTerminalResources(id)
         this.safeSend(`terminal:exit:${id}`, { exitCode, signal })
+        resetInputDetector(id)
         this.instances.delete(id)
       })
 
@@ -349,7 +355,7 @@ export class PtyService {
 
   /**
    * Process terminal output for state detection
-   * v3: 进程检测添加最小间隔 + 重负载期间跳过
+   * v5: 参考 muxvo manager.ts — 防抖 + Running-only WaitingInput 检测
    */
   private processTerminalOutput(id: string, data: string, instance: PtyInstance): void {
     // 单次解析所有 OSC 序列，避免重复正则匹配
@@ -366,51 +372,65 @@ export class PtyService {
       }
     }
 
-    // 输入等待检测
-    const isWaiting = sequences.some(s => s.type === 'bell') ||
-                      sequences.some(s => s.type === 'osc133' && s.value === 'A')
+    // 状态防抖器：所有状态变更经过 50ms debounce，防止密集输出导致的状态振荡
     const debouncer = this.stateDebouncers.get(id)
-    if (debouncer) {
-      const newState = isWaiting ? 'waiting_input' : 'running'
-      debouncer.notify(newState, (state) => {
-        if (instance.state !== state) {
-          instance.state = state as 'running' | 'waiting_input' | 'busy'
-          this.safeSend('terminal:state', { id, state })
-        }
-      })
+    if (!debouncer) return
+
+    // 统一状态发送（通过 debouncer）
+    const sendState = (newState: string) => {
+      if (instance.state !== newState) {
+        instance.state = newState
+        debouncer.notify(newState, (s) => {
+          this.safeSend('terminal:state', { id, state: s })
+        })
+      }
     }
 
-    // 命令状态检测
+    // 命令状态检测（OSC133）
     const osc133 = sequences.filter(s => s.type === 'osc133')
     const commandStarted = osc133.some(s => s.value === 'B' || s.value === 'C')
     const commandEnded = osc133.some(s => s.value === 'D')
     const isPromptReady = osc133.some(s => s.value === 'A')
 
-    if (commandStarted) {
-      instance.state = 'busy'
-      instance.foregroundProcess = 'pending'
-      this.safeSend('terminal:state', { id, state: 'busy' })
+    // OSC133 处理：一旦进入 waiting_input，不再处理 OSC133（只有用户输入能切回 running）
+    // 参考 muxvo：muxvo 完全不处理 OSC133 状态，我们保留但加保护
+    if (instance.state !== 'waiting_input') {
+      if (commandStarted) {
+        sendState('busy')
+        instance.foregroundProcess = 'pending'
 
-      // 前台进程检测（默认关闭，见 FOREGROUND_DETECTION_ENABLED）
-      if (PtyService.FOREGROUND_DETECTION_ENABLED) {
-        // 进程检测节流：重负载期间跳过 + 最小间隔保护
-        const monitor = this.rateMonitors.get(id)
-        const lastDetect = this.lastDetectionTime.get(id) || 0
-        const now = Date.now()
-        const tooRecent = (now - lastDetect) < PtyService.MIN_DETECTION_INTERVAL_MS
-        const heavyOutput = monitor?.isHeavyOutput ?? false
+        // 前台进程检测（默认关闭，见 FOREGROUND_DETECTION_ENABLED）
+        if (PtyService.FOREGROUND_DETECTION_ENABLED) {
+          const monitor = this.rateMonitors.get(id)
+          const lastDetect = this.lastDetectionTime.get(id) || 0
+          const now = Date.now()
+          const tooRecent = (now - lastDetect) < PtyService.MIN_DETECTION_INTERVAL_MS
+          const heavyOutput = monitor?.isHeavyOutput ?? false
 
-        if (!this.detectingPids.has(id) && !heavyOutput && !tooRecent) {
-          this.lastDetectionTime.set(id, now)
-          this.detectForegroundProcessAsyncHandler(id, instance)
+          if (!this.detectingPids.has(id) && !heavyOutput && !tooRecent) {
+            this.lastDetectionTime.set(id, now)
+            this.detectForegroundProcessAsyncHandler(id, instance)
+          }
         }
+      } else if (commandEnded) {
+        instance.foregroundProcess = null
+        instance.foregroundProcessPid = null
+        sendState('running')
+      } else if (isPromptReady) {
+        sendState('running')
       }
     }
-    if (commandEnded || isPromptReady) {
-      instance.state = 'running'
-      instance.foregroundProcess = null
-      instance.foregroundProcessPid = null
-      this.safeSend('terminal:state', { id, state: 'running' })
+
+    // WaitingInput 检测：只在 Running 状态下触发（参考 muxvo manager.ts L233）
+    // 1. 独立 BEL 信号（排除 OSC 终止符中的 BEL）
+    // 2. 滚动缓冲区文本模式匹配（"Esc to cancel"、y/n 提示等）
+    if (instance.state === 'running') {
+      const hasBell = detectBellSignal(data)
+      const textDetected = detectWaitingInput(data, id)
+      if (hasBell || textDetected) {
+        resetInputDetector(id)
+        sendState('waiting_input')
+      }
     }
   }
 
@@ -650,6 +670,17 @@ export class PtyService {
   write(id: string, data: string): void {
     const instance = this.instances.get(id)
     if (instance) {
+      // 用户输入时从 waiting_input 切回 running（参考 muxvo manager.ts）
+      if (instance.state === 'waiting_input') {
+        instance.state = 'running'
+        resetInputDetector(id)
+        const debouncer = this.stateDebouncers.get(id)
+        if (debouncer) {
+          debouncer.notify('running', (s) => {
+            this.safeSend('terminal:state', { id, state: s })
+          })
+        }
+      }
       instance.pty.write(data)
     } else {
       console.log('[PTY] write failed - instance not found:', id)

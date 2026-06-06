@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Terminal as XTerm } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { WebLinksAddon } from 'xterm-addon-web-links'
@@ -7,12 +7,16 @@ import { WebglAddon } from 'xterm-addon-webgl'
 import 'xterm/css/xterm.css'
 import { TerminalInstance } from '../../App'
 import { getXTermTheme } from '../../hooks/useTheme'
+import { WorktreePopover } from '../Worktree/WorktreePopover'
 
 interface TerminalPaneProps {
   terminal: TerminalInstance
   onClose: () => void
   onRename: (name: string) => void
   onFocus: () => void
+  onStateChange: (state: string) => void
+  onCwdChange: (cwd: string) => void
+  onOpenWorktree: (path: string) => void
   isFocused: boolean
   isInFocusMode?: boolean
   onToggleFocusMode?: () => void
@@ -45,11 +49,26 @@ function formatCwd(cwd: string | null): string {
   return '.../' + filtered.slice(-2).join('/')
 }
 
+// 从 cwd 路径检测 worktree 项目信息
+function getWorktreeInfo(cwd: string): { projectName: string } | null {
+  const markerPos = cwd.indexOf('/.worktrees/')
+  const markerPosWin = cwd.indexOf('\\.worktrees\\')
+  const idx = markerPos >= 0 ? markerPos : markerPosWin
+  if (idx < 0) return null
+  const separator = markerPos >= 0 ? '/' : '\\'
+  const projectPath = cwd.substring(0, idx)
+  const projectName = projectPath.split(separator).pop() || ''
+  return projectName ? { projectName } : null
+}
+
 export function TerminalPane({
   terminal,
   onClose,
   onRename,
   onFocus,
+  onStateChange,
+  onCwdChange,
+  onOpenWorktree,
   isFocused,
   isInFocusMode = false,
   onToggleFocusMode,
@@ -61,6 +80,10 @@ export function TerminalPane({
   const [isEditing, setIsEditing] = useState(false)
   const [editName, setEditName] = useState(terminal.name)
   const [currentCwd, setCurrentCwd] = useState<string | null>(terminal.cwd || null)
+  const [isGitRepo, setIsGitRepo] = useState(false)
+  const [showWorktreePopover, setShowWorktreePopover] = useState(false)
+  const [worktreeAnchorRect, setWorktreeAnchorRect] = useState<{ top: number; left: number } | null>(null)
+  const worktreeBtnRef = useRef<HTMLButtonElement>(null)
 
   // 初始化终端
   useEffect(() => {
@@ -216,11 +239,19 @@ export function TerminalPane({
         ? ` (exitCode=${info.exitCode}${info.signal != null ? `, signal=${info.signal}` : ''})`
         : ''
       xterm.write(`\r\n\x1b[33m终端已关闭${detail}\x1b[0m\r\n`)
+      // 通知父组件状态变为 idle（让状态圆点变灰）
+      onStateChange('idle')
     })
 
     // 监听终端路径变化
     const unsubscribeCwd = window.electron.terminal.onCwd(terminal.id, (cwd) => {
       setCurrentCwd(cwd)
+      onCwdChange(cwd)
+    })
+
+    // 监听终端状态变化
+    const unsubscribeState = window.electron.terminal.onState(terminal.id, (state) => {
+      onStateChange(state)
     })
 
     // 处理复制粘贴
@@ -297,6 +328,7 @@ export function TerminalPane({
       unsubscribe()
       unsubscribeExit()
       unsubscribeCwd()
+      unsubscribeState()
       resizeObserver.disconnect()
       container.removeEventListener('click', handleClick)
       container.removeEventListener('keydown', handleKeyDown, { capture: true })
@@ -344,6 +376,18 @@ export function TerminalPane({
     }
   }, [theme])
 
+  // 检测 cwd 是否在 git 仓库中
+  useEffect(() => {
+    if (!currentCwd) { setIsGitRepo(false); return }
+    let cancelled = false
+    window.electron.worktree.detectRepo(currentCwd).then((result) => {
+      if (!cancelled) setIsGitRepo(result.isRepo)
+    }).catch(() => {
+      if (!cancelled) setIsGitRepo(false)
+    })
+    return () => { cancelled = true }
+  }, [currentCwd])
+
   // 处理重命名
   const handleRename = () => {
     if (editName.trim() && editName !== terminal.name) {
@@ -381,7 +425,16 @@ export function TerminalPane({
             />
           ) : (
             <>
-              <span className="terminal-icon">⬡</span>
+              <span className={`terminal-status-dot ${
+                terminal.state === 'waiting_input' ? 'waiting' :
+                terminal.state === 'running' || terminal.state === 'busy' ? 'running' : 'idle'
+              }`} />
+              {/* Worktree 项目徽章 */}
+              {currentCwd && getWorktreeInfo(currentCwd) && (
+                <span className="terminal-worktree-badge">
+                  {getWorktreeInfo(currentCwd)!.projectName}
+                </span>
+              )}
               {currentCwd ? (
                 <>
                   <span className="terminal-cwd" title={currentCwd}>
@@ -395,7 +448,46 @@ export function TerminalPane({
           )}
         </div>
 
+        {/* WaitingInput 红色徽章 */}
+        {terminal.state === 'waiting_input' && (
+          <span className="terminal-waiting-badge">1</span>
+        )}
+
         <div className="terminal-actions">
+          {/* Worktree 按钮 */}
+          {isGitRepo && (
+            <button
+              ref={worktreeBtnRef}
+              className="terminal-action-btn worktree-btn"
+              onClick={(e) => {
+                e.stopPropagation()
+                if (worktreeBtnRef.current) {
+                  const rect = worktreeBtnRef.current.getBoundingClientRect()
+                  setWorktreeAnchorRect({ top: rect.bottom + 4, left: rect.left })
+                  setShowWorktreePopover(prev => !prev)
+                }
+              }}
+              title="Git Worktree"
+            >
+              &#xE0A0;
+            </button>
+          )}
+          {/* 文件浏览器按钮 */}
+          {currentCwd && (
+            <button
+              className="terminal-action-btn file-btn"
+              onClick={(e) => {
+                e.stopPropagation()
+                window.electron.shell.openPath(currentCwd)
+              }}
+              title="在资源管理器中打开"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7c0-1.1.9-2 2-2h4l2 2h8c1.1 0 2 .9 2 2v9c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2V7z" fillOpacity="0.2" />
+                <path d="M3 7c0-1.1.9-2 2-2h4l2 2h8c1.1 0 2 .9 2 2v9c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2V7z" fill="none" strokeWidth="1.5" />
+              </svg>
+            </button>
+          )}
           {/* 聚焦按钮 */}
           {onToggleFocusMode && (
             <button
@@ -423,6 +515,20 @@ export function TerminalPane({
         ref={containerRef}
         tabIndex={0}
       />
+
+      {/* Worktree Popover */}
+      {isGitRepo && showWorktreePopover && currentCwd && (
+        <WorktreePopover
+          terminalCwd={currentCwd}
+          open={showWorktreePopover}
+          anchorRect={worktreeAnchorRect}
+          onClose={() => { setShowWorktreePopover(false); setWorktreeAnchorRect(null) }}
+          onOpenWorktree={(path) => {
+            onOpenWorktree(path)
+            setShowWorktreePopover(false)
+          }}
+        />
+      )}
     </div>
   )
 }

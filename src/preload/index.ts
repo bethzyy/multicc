@@ -14,6 +14,7 @@ import type {
   CustomCommand,
   ToolsConfig,
 } from '../shared/types/tools.types'
+import type { WorktreeInfo } from '../shared/types/worktree.types'
 
 // 暴露给渲染进程的 API
 const electronAPI = {
@@ -62,6 +63,14 @@ const electronAPI = {
       const handler = (_: unknown, cwd: string) => callback(cwd)
       ipcRenderer.on(channel, handler)
       return () => ipcRenderer.removeListener(channel, handler)
+    },
+
+    onState: (id: string, callback: (state: string) => void) => {
+      const handler = (_: unknown, data: { id: string; state: string }) => {
+        if (data.id === id) callback(data.state)
+      }
+      ipcRenderer.on('terminal:state', handler)
+      return () => ipcRenderer.removeListener('terminal:state', handler)
     }
   },
 
@@ -310,6 +319,29 @@ const electronAPI = {
       data?: { slugs: string[] };
       error?: string;
     }> => ipcRenderer.invoke('marketplace:installed'),
+  },
+
+  // Git Worktree 管理 (新增)
+  worktree: {
+    detectRepo: (cwd: string): Promise<{ isRepo: boolean; repoPath?: string; branch?: string }> =>
+      ipcRenderer.invoke('worktree:detect-repo', cwd),
+
+    list: (repoPath: string): Promise<WorktreeInfo[]> =>
+      ipcRenderer.invoke('worktree:list', repoPath),
+
+    create: (repoPath: string): Promise<{ success: boolean; worktreePath?: string; branch?: string; error?: string }> =>
+      ipcRenderer.invoke('worktree:create', repoPath),
+
+    rename: (worktreePath: string, newBranch: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('worktree:rename', worktreePath, newBranch),
+
+    remove: (worktreePath: string, force?: boolean): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('worktree:remove', worktreePath, force),
+  },
+
+  // Shell 工具
+  shell: {
+    openPath: (path: string) => ipcRenderer.invoke('shell:openPath', path),
   }
 }
 

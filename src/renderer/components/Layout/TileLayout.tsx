@@ -8,6 +8,9 @@ interface TileLayoutProps {
   onCloseTerminal: (id: string) => void
   onRenameTerminal: (id: string, name: string) => void
   onFocusTerminal: (id: string) => void
+  onTerminalStateChange: (id: string, state: string) => void
+  onTerminalCwdChange: (id: string, cwd: string) => void
+  onOpenWorktree: (path: string) => void
   focusMode: boolean
   onToggleFocusModeForTerminal: (id: string) => void
   theme: 'dark' | 'light'
@@ -19,6 +22,9 @@ export function TileLayout({
   onCloseTerminal,
   onRenameTerminal,
   onFocusTerminal,
+  onTerminalStateChange,
+  onTerminalCwdChange,
+  onOpenWorktree,
   focusMode,
   onToggleFocusModeForTerminal,
   theme
@@ -60,6 +66,9 @@ export function TileLayout({
             onClose={() => onCloseTerminal(terminal.id)}
             onRename={(name) => onRenameTerminal(terminal.id, name)}
             onFocus={() => onFocusTerminal(terminal.id)}
+            onStateChange={(state) => onTerminalStateChange(terminal.id, state)}
+            onCwdChange={(cwd) => onTerminalCwdChange(terminal.id, cwd)}
+            onOpenWorktree={onOpenWorktree}
             isFocused={terminal.id === focusedId}
             isInFocusMode={focusMode && terminal.id === focusedId}
             onToggleFocusMode={() => onToggleFocusModeForTerminal(terminal.id)}

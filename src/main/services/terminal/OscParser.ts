@@ -145,24 +145,104 @@ export function detectCommandState(data: string): {
 }
 
 /**
- * Pattern detection for common "waiting for input" indicators
- * Used as fallback when OSC sequences are not available
+ * Detect standalone BEL character in raw PTY data.
+ * BEL (\x07) is used by CLI tools to signal attention (permission prompt, etc.).
+ * Must exclude BEL used as OSC terminator — ported from muxvo input-detector.ts.
  */
-export function detectWaitingPatterns(data: string): boolean {
-  const waitingPatterns = [
-    // Common prompts
-    /\n[>$#]\s*$/m,           // Unix-style prompts
-    /\nPS\s+[A-Z]:\\.*>\s*$/m, // PowerShell prompts
-    /\n>>>?\s*$/m,            // Python REPL
-    /\nIn \[\d+\]:\s*$/m,     // IPython/Jupyter
-    /\n>>\s*$/m,              // Node.js REPL
-    /:\s*$/m,                 // Vim command mode
-    /\?\s*$/m,                // Question prompts
-    /Press .* to continue/i,  // Continue prompts
-    /Enter .*:/i,             // Input prompts
-  ];
+export function detectBellSignal(data: string): boolean {
+  const withoutOsc = data.replace(/\x1b\][^\x07\x1b]*\x07/g, '')
+  return withoutOsc.includes('\x07')
+}
 
-  return waitingPatterns.some(pattern => pattern.test(data));
+/**
+ * WaitingInput detection — ported from muxvo input-detector.ts
+ *
+ * Uses per-terminal rolling buffers to handle prompts split across output chunks.
+ * Without rolling buffer, Claude Code's TUI output (which splits a single prompt
+ * across dozens of small data chunks) would never match any pattern.
+ */
+
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07\x1b]*[\x07]|\x1b\].*?\x1b\\|\x1b[()][AB012]|\x1b\[[\?]?[0-9;]*[hlm]/g
+
+function stripAnsi(str: string): string {
+  const noAnsi = str.replace(ANSI_RE, '')
+  return noAnsi.replace(/\r\n/g, '\n').replace(/[^\n]*\r([^\n\r]+)/g, '$1').replace(/\r/g, '')
+}
+
+// Precise signal: "Esc to cancel" is unique to Claude Code approval prompts
+const ESC_CANCEL_PATTERN = /Esc\s*to\s*cancel/
+
+// Combo: question line + numbered selector = interactive prompt
+const QUESTION_LINE_PATTERN = /\?\s*$/m
+const NUMBERED_OPTION_PATTERN = /❯\s*\d+\./
+
+// Generic interactive prompt patterns
+const GENERIC_PATTERNS = [
+  /^\s*\?\s+.+[:：]\s*$/m,    // "? Select an option:"
+  /\([yYnN]\/[yYnN]\)/,      // "(y/n)"
+  /\[[yYnN]\/[yYnN]\]/,      // "[y/N]"
+  /press\s*(any\s*)?key/i,   // "press any key"
+  /enter\s*to\s*continue/i,  // "Enter to continue"
+]
+
+// Exclude patterns: avoid false positives on progress bars etc.
+const EXCLUDE_PATTERNS = [
+  /^\s*\d+[%％]/,       // Progress bar: "50%"
+  /\[\d+\/\d+\]/,       // Progress: "[3/10]"
+  /^(INFO|WARN|ERROR|DEBUG)/i, // Log lines
+]
+
+// Per-terminal rolling buffers (same as muxvo)
+const inputBuffers = new Map<string, string>()
+const ROLLING_MAX = 2000
+
+export function detectWaitingInput(data: string, terminalId: string): boolean {
+  const key = terminalId
+
+  // Append to per-terminal rolling buffer
+  const prev = inputBuffers.get(key) ?? ''
+  let updated = prev + data
+  if (updated.length > ROLLING_MAX) {
+    updated = updated.slice(updated.length - ROLLING_MAX)
+  }
+  inputBuffers.set(key, updated)
+
+  // Strip ANSI codes for clean matching
+  const clean = stripAnsi(updated)
+
+  // 1. "Esc to cancel" (Claude Code specific, highest precision)
+  if (ESC_CANCEL_PATTERN.test(clean)) {
+    inputBuffers.delete(key)
+    return true
+  }
+
+  // Check exclusions only against the tail (recent output)
+  const tail = clean.slice(-300)
+  for (const exclude of EXCLUDE_PATTERNS) {
+    if (exclude.test(tail)) return false
+  }
+
+  // 2. Combo: question + numbered selector
+  if (QUESTION_LINE_PATTERN.test(clean) && NUMBERED_OPTION_PATTERN.test(clean)) {
+    inputBuffers.delete(key)
+    return true
+  }
+
+  // 3. Generic patterns
+  for (const pattern of GENERIC_PATTERNS) {
+    if (pattern.test(clean)) {
+      inputBuffers.delete(key)
+      return true
+    }
+  }
+
+  return false
+}
+
+/** Reset the rolling buffer for a specific terminal */
+export function resetInputDetector(terminalId: string): void {
+  inputBuffers.delete(terminalId)
 }
 
 /**

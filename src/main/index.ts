@@ -8,6 +8,7 @@ import { registerConfigHandlers } from './ipc/config-handlers'
 import { registerUpdateHandlers } from './ipc/update-handlers'
 import { registerToolsHandlers } from './ipc/tools-handlers'
 import { registerMarketplaceHandlers } from './ipc/marketplace-handlers'
+import { registerWorktreeHandlers } from './ipc/worktree-handlers'
 import { isValidWorkingDir, isUrlSafe } from './utils/security'
 
 // 禁用 GPU 缓存警告
@@ -183,6 +184,14 @@ function registerIpcHandlers() {
 
   // CLI 工具管理 (新增)
   registerToolsHandlers(mainWindow!, storeService)
+
+  // Git Worktree 管理 (新增)
+  registerWorktreeHandlers()
+
+  // Shell 工具 (打开文件管理器等)
+  ipcMain.handle('shell:openPath', async (_event, path: string) => {
+    return shell.openPath(path)
+  })
 
   // 自动更新 (生产环境)
   if (!isDev) {
