@@ -7,6 +7,7 @@ import { WebglAddon } from 'xterm-addon-webgl'
 import 'xterm/css/xterm.css'
 import { TerminalInstance } from '../../App'
 import { getXTermTheme } from '../../hooks/useTheme'
+import { ScrollbackDeduplicator } from '../../utils/ScrollbackDeduplicator'
 import { WorktreePopover } from '../Worktree/WorktreePopover'
 
 interface TerminalPaneProps {
@@ -180,6 +181,7 @@ export function TerminalPane({
     let rafId = 0
     let isDisposed = false
     const MAX_WRITE_PER_FRAME = 512 * 1024  // 512KB per frame max
+    const deduplicator = new ScrollbackDeduplicator()
 
     const flushWrites = () => {
       rafId = 0
@@ -187,6 +189,11 @@ export function TerminalPane({
         // 极端压力下截断，保留最新数据
         if (pendingData.length > MAX_WRITE_PER_FRAME) {
           pendingData = pendingData.slice(-MAX_WRITE_PER_FRAME)
+        }
+        // 检测 scrollback 重复内容并跳过写入
+        if (deduplicator.isDuplicate(pendingData)) {
+          pendingData = ''
+          return
         }
         try {
           xterm.write(pendingData)
