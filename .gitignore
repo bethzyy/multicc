@@ -40,3 +40,4 @@ npm-debug.log*
 *.asar
 .claude/skills/toutiao-img/
 .claude/skills/toutiao-fmt.md
+.worktrees/

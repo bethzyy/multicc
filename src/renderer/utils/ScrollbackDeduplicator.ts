@@ -6,28 +6,25 @@
  * 通过光标移动重绘内容，将旧版本推入 scrollback，导致向上滚动时看到镜像式重复。
  * Windows ConPTY 也存在已知的输出回声 bug，可能同样导致重复。
  *
- * 策略：维护最近写入行的 hash 环形缓冲区。当新数据中连续 ≥5 行与缓冲区匹配、
- * 且总匹配率 ≥80%，且距上次写入 ≤500ms 时，跳过该次写入。
+ * 策略：维护最近写入行的 hash 环形缓冲区。当新数据中连续 ≥8 行与缓冲区匹配、
+ * 且总匹配率 ≥80% 时，跳过该次写入。不设时间窗口限制——Claude Code 的 re-render
+ * 间隔通常数秒甚至数十秒，时间窗口会导致去重完全失效。
  */
 
 export class ScrollbackDeduplicator {
   private lineHashes: string[] = []
-  private lastWriteTime = 0
   private readonly maxSize: number
   private readonly minLines: number
   private readonly matchThreshold: number
-  private readonly windowMs: number
 
   constructor(opts?: {
     maxSize?: number
     minLines?: number
     matchThreshold?: number
-    windowMs?: number
   }) {
-    this.maxSize = opts?.maxSize ?? 300
-    this.minLines = opts?.minLines ?? 5
+    this.maxSize = opts?.maxSize ?? 1000
+    this.minLines = opts?.minLines ?? 8
     this.matchThreshold = opts?.matchThreshold ?? 0.8
-    this.windowMs = opts?.windowMs ?? 500
   }
 
   /** 剥离 ANSI/OSC 转义序列，只保留可见文本 */
@@ -58,15 +55,11 @@ export class ScrollbackDeduplicator {
    * 同时将新行 hash 记入缓冲区（无论是否重复）。
    */
   isDuplicate(data: string): boolean {
-    const now = Date.now()
-    const elapsed = now - this.lastWriteTime
-
     const clean = this.stripAnsi(data)
     const lines = clean.split('\n').map(l => l.trim()).filter(l => l.length > 0)
 
-    // 行数不足或距上次写入超过窗口 → 跳过去重检查
-    if (lines.length < this.minLines || elapsed > this.windowMs) {
-      this.lastWriteTime = now
+    // 行数不足 → 跳过去重检查
+    if (lines.length < this.minLines) {
       this.addLines(lines)
       return false
     }
@@ -92,8 +85,6 @@ export class ScrollbackDeduplicator {
       maxConsec >= this.minLines &&
       totalMatch / hashes.length >= this.matchThreshold
 
-    this.lastWriteTime = now
-
     // 非重复内容才需要记入缓冲（重复的已在里面了）
     if (!isDup) {
       this.addLines(lines)
@@ -114,6 +105,5 @@ export class ScrollbackDeduplicator {
 
   reset(): void {
     this.lineHashes = []
-    this.lastWriteTime = 0
   }
 }

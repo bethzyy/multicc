@@ -316,7 +316,7 @@ export class PtyService {
         if (!this.instances.has(id)) return
         console.log('[PTY] Process exited:', id, 'code:', exitCode, 'signal:', signal)
         // 发送 idle 状态（让前端显示灰色灯）。退出是终态，不需要防抖，直接发送。
-        this.safeSend('terminal:state', { id, state: 'idle' })
+        this.safeSend(`terminal:state:${id}`, 'idle')
         // 进程自然退出：先 cleanupTerminalResources（内含 flushBatch，把退出前最后一行
         // 输出发给渲染端）再发 exit，保证最后输出先于「终端已关闭」显示。此处不杀进程（已自行退出）。
         this.cleanupTerminalResources(id)
@@ -381,7 +381,7 @@ export class PtyService {
       if (instance.state !== newState) {
         instance.state = newState
         debouncer.notify(newState, (s) => {
-          this.safeSend('terminal:state', { id, state: s })
+          this.safeSend(`terminal:state:${id}`, s)
         })
       }
     }
@@ -677,7 +677,7 @@ export class PtyService {
         const debouncer = this.stateDebouncers.get(id)
         if (debouncer) {
           debouncer.notify('running', (s) => {
-            this.safeSend('terminal:state', { id, state: s })
+            this.safeSend(`terminal:state:${id}`, s)
           })
         }
       }

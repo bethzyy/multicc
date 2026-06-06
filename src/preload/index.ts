@@ -66,11 +66,10 @@ const electronAPI = {
     },
 
     onState: (id: string, callback: (state: string) => void) => {
-      const handler = (_: unknown, data: { id: string; state: string }) => {
-        if (data.id === id) callback(data.state)
-      }
-      ipcRenderer.on('terminal:state', handler)
-      return () => ipcRenderer.removeListener('terminal:state', handler)
+      const channel = `terminal:state:${id}`
+      const handler = (_: unknown, state: string) => callback(state)
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
     }
   },
 
