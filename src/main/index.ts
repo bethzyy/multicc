@@ -30,8 +30,9 @@ let ptyService: PtyService
 let configService: ConfigService
 let storeService: StoreService
 
-// 开发环境检测
-const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
+// 开发环境检测：以 electron-vite 设置的 ELECTRON_RENDERER_URL 为准。
+// 这样 npm run dev 时为 true（连 dev server），独立 electron . 启动时为 false（加载 out/ 静态文件）。
+const isDev = !!process.env.ELECTRON_RENDERER_URL
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -52,7 +53,8 @@ function createWindow() {
 
   // 加载页面
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173')
+    // 用 electron-vite 实际分配的 dev server 地址（端口可能非 5173），避免硬编码端口导致白屏
+    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL || 'http://localhost:5173')
   } else {
     // 生产环境设置 CSP
     mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {

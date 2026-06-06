@@ -47,6 +47,13 @@ export class PtyService {
   private lastDetectionTime: Map<string, number> = new Map()
   private static readonly MIN_DETECTION_INTERVAL_MS = 3000  // 最少 3 秒间隔
 
+  // 前台进程检测开关（默认关闭）
+  // 关闭原因：detectForegroundProcessAsync / tasklist 会反复 spawn 子进程，
+  // 但其产出的 terminal:state / terminal:process 事件目前没有任何渲染端消费者，
+  // 长时间运行会造成内存/句柄缓慢增长。cwd 显示仍由 parseCwdFromBuffer 驱动。
+  // 日后若要做 busy/前台进程 UI，将此开关置 true 并补上渲染端监听即可。
+  private static readonly FOREGROUND_DETECTION_ENABLED: boolean = false
+
   // 统一轮询调度器（Phase 1 优化：解决 WMI 查询风暴）
   private globalPollTimer?: ReturnType<typeof setInterval>
   private pollQueue: string[] = []  // 终端 ID 队列
@@ -107,7 +114,8 @@ export class PtyService {
     const batched = this.dataBatchBuffers.get(id)
     this.dataBatchBuffers.delete(id)
     if (batched) {
-      this.safeSend('terminal:data', { id, data: batched })
+      // per-terminal 通道：仅该终端的 TerminalPane 监听，消除 O(N) 扇出
+      this.safeSend(`terminal:data:${id}`, batched)
     }
   }
 
@@ -211,17 +219,35 @@ export class PtyService {
       // 注意：删除 CLAUDECODE 环境变量，允许在 multicc 终端中运行 Claude Code
       const { CLAUDECODE, ...envWithoutClaudeCode } = process.env
 
-      const ptyProcess = pty.spawn(shell, [], {
+      // 优先 ConPTY（支持 24-bit 真彩色）；失败时回退 winpty（颜色降到 16 色）。
+      // 历史背景：Electron 40 主进程下 ConPTY 曾返回 ERROR_ACCESS_DENIED (error 5)，
+      // 当时被迫强制 winpty，但 winpty 会把 RGB 压成 16 色，导致 Claude Code 等
+      // 子进程的真彩色 UI（如 mascot）颜色失真。改成 try/fallback 而不是硬切死一种。
+      const baseOptions = {
         name: 'xterm-256color',
-        cols: cols,
-        rows: rows,
+        cols,
+        rows,
         cwd: workingDir,
         env: {
           ...envWithoutClaudeCode,
           TERM: 'xterm-256color',
-          COLORTERM: 'truecolor'
+          COLORTERM: 'truecolor',
+          // 强制 Claude Code 用"经典渲染器"，把对话留在终端原生回滚缓冲里（而非备用屏 alt-screen）。
+          // 备用屏没有回滚 → 没有滚动条、滚不动历史。经典渲染器让内容滚进 xterm scrollback。
+          // 代价：经典渲染器在重绘时会有轻微闪烁（备用屏模式正是为消除闪烁而生）。
+          CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: '1'
         }
-      })
+      }
+      let ptyProcess: pty.IPty
+      try {
+        ptyProcess = pty.spawn(shell, [], { ...baseOptions, useConpty: true })
+        console.log('[PTY] Backend: ConPTY (true color)')
+      } catch (conptyErr) {
+        const msg = conptyErr instanceof Error ? conptyErr.message : String(conptyErr)
+        console.warn('[PTY] ConPTY failed, falling back to winpty:', msg)
+        ptyProcess = pty.spawn(shell, [], { ...baseOptions, useConpty: false })
+        console.log('[PTY] Backend: winpty (16-color fallback)')
+      }
 
       console.log('[PTY] Process created, PID:', ptyProcess.pid)
 
@@ -280,12 +306,17 @@ export class PtyService {
       })
 
       // 监听退出
-      ptyProcess.onExit(({ exitCode }) => {
+      ptyProcess.onExit(({ exitCode, signal }) => {
         if (this.isShuttingDown) return  // 关闭时不再发送事件
-        console.log('[PTY] Process exited:', id, 'code:', exitCode)
-        this.safeSend('terminal:exit', { id, exitCode })
+        // destroy() 主动 kill 时也会触发本回调；destroy 已删除实例并清理过，
+        // 这里据此跳过，避免二次清理与多余的 terminal:exit。仅处理"进程自发退出"。
+        if (!this.instances.has(id)) return
+        console.log('[PTY] Process exited:', id, 'code:', exitCode, 'signal:', signal)
+        // 进程自然退出：先 cleanupTerminalResources（内含 flushBatch，把退出前最后一行
+        // 输出发给渲染端）再发 exit，保证最后输出先于「终端已关闭」显示。此处不杀进程（已自行退出）。
+        this.cleanupTerminalResources(id)
+        this.safeSend(`terminal:exit:${id}`, { exitCode, signal })
         this.instances.delete(id)
-        this.stateDebouncers.delete(id)
       })
 
       this.instances.set(id, {
@@ -301,7 +332,7 @@ export class PtyService {
       })
 
       // 立即发送初始 cwd 到渲染进程（修复路径不显示问题）
-      this.safeSend('terminal:cwd', { id, cwd: workingDir })
+      this.safeSend(`terminal:cwd:${id}`, workingDir)
 
       // 添加到统一轮询队列（Phase 1 优化：替代独立定时器）
       this.pollQueue.push(id)
@@ -331,7 +362,7 @@ export class PtyService {
       const newCwd = osc99?.value || osc7?.value || null
       if (newCwd && newCwd !== instance.cwd && this.isValidCwdPath(newCwd)) {
         instance.cwd = newCwd
-        this.safeSend('terminal:cwd', { id, cwd: newCwd })
+        this.safeSend(`terminal:cwd:${id}`, newCwd)
       }
     }
 
@@ -360,16 +391,19 @@ export class PtyService {
       instance.foregroundProcess = 'pending'
       this.safeSend('terminal:state', { id, state: 'busy' })
 
-      // 进程检测节流：重负载期间跳过 + 最小间隔保护
-      const monitor = this.rateMonitors.get(id)
-      const lastDetect = this.lastDetectionTime.get(id) || 0
-      const now = Date.now()
-      const tooRecent = (now - lastDetect) < PtyService.MIN_DETECTION_INTERVAL_MS
-      const heavyOutput = monitor?.isHeavyOutput ?? false
+      // 前台进程检测（默认关闭，见 FOREGROUND_DETECTION_ENABLED）
+      if (PtyService.FOREGROUND_DETECTION_ENABLED) {
+        // 进程检测节流：重负载期间跳过 + 最小间隔保护
+        const monitor = this.rateMonitors.get(id)
+        const lastDetect = this.lastDetectionTime.get(id) || 0
+        const now = Date.now()
+        const tooRecent = (now - lastDetect) < PtyService.MIN_DETECTION_INTERVAL_MS
+        const heavyOutput = monitor?.isHeavyOutput ?? false
 
-      if (!this.detectingPids.has(id) && !heavyOutput && !tooRecent) {
-        this.lastDetectionTime.set(id, now)
-        this.detectForegroundProcessAsyncHandler(id, instance)
+        if (!this.detectingPids.has(id) && !heavyOutput && !tooRecent) {
+          this.lastDetectionTime.set(id, now)
+          this.detectForegroundProcessAsyncHandler(id, instance)
+        }
       }
     }
     if (commandEnded || isPromptReady) {
@@ -433,50 +467,54 @@ export class PtyService {
     const instance = this.instances.get(id)
     if (!instance || !instance.pty.pid) return
 
-    // Phase 2: 智能跳过 - 如果上次检测到的进程还在运行，跳过完整检测
-    if (instance.lastPolledPid) {
-      const stillRunning = await this.isProcessRunningAsync(instance.lastPolledPid)
-      if (stillRunning) {
-        // 进程仍在运行，跳过完整 WMI 检测
+    // 前台进程检测（默认关闭，见 FOREGROUND_DETECTION_ENABLED）
+    // 关闭时跳过所有 WMI / tasklist 调用，直接走 buffer 解析更新 cwd
+    if (PtyService.FOREGROUND_DETECTION_ENABLED) {
+      // Phase 2: 智能跳过 - 如果上次检测到的进程还在运行，跳过完整检测
+      if (instance.lastPolledPid) {
+        const stillRunning = await this.isProcessRunningAsync(instance.lastPolledPid)
+        if (stillRunning) {
+          // 进程仍在运行，跳过完整 WMI 检测
+          return
+        }
+        // 进程已结束，清除缓存
+        instance.lastPolledPid = null
+      }
+
+      // 如果已经有前台进程在运行，先检查进程是否还存在（轻量级异步检查）
+      if (instance.foregroundProcess && instance.foregroundProcess !== 'pending') {
+        // 轻量级检查：进程是否还在运行
+        const stillRunning = await this.isProcessRunningAsync(instance.foregroundProcessPid)
+        if (stillRunning) {
+          // 进程还在运行，不需要重新检测，直接返回
+          // 同时更新 lastPolledPid 用于下次智能跳过
+          instance.lastPolledPid = instance.foregroundProcessPid
+          return
+        }
+        // 进程已结束，清除标记
+        console.log('[PTY] Foreground process ended:', instance.foregroundProcess)
+        instance.foregroundProcess = null
+        instance.foregroundProcessPid = null
+        instance.lastPolledPid = null
+      }
+
+      // 没有前台进程或进程已结束，执行异步检测
+      const processInfo = await detectForegroundProcessAsync(instance.pty.pid)
+
+      if (processInfo) {
+        // 缓存进程信息
+        instance.foregroundProcess = processInfo.name
+        instance.foregroundProcessPid = processInfo.pid
+        instance.lastPolledPid = processInfo.pid  // Phase 2: 用于下次智能跳过
+        this.safeSend('terminal:process', {
+          id,
+          process: processInfo.name,
+          pid: processInfo.pid,
+          cwd: processInfo.cwd
+        })
+        console.log('[PTY] Detected foreground process:', processInfo.name, 'pid:', processInfo.pid)
         return
       }
-      // 进程已结束，清除缓存
-      instance.lastPolledPid = null
-    }
-
-    // 如果已经有前台进程在运行，先检查进程是否还存在（轻量级异步检查）
-    if (instance.foregroundProcess && instance.foregroundProcess !== 'pending') {
-      // 轻量级检查：进程是否还在运行
-      const stillRunning = await this.isProcessRunningAsync(instance.foregroundProcessPid)
-      if (stillRunning) {
-        // 进程还在运行，不需要重新检测，直接返回
-        // 同时更新 lastPolledPid 用于下次智能跳过
-        instance.lastPolledPid = instance.foregroundProcessPid
-        return
-      }
-      // 进程已结束，清除标记
-      console.log('[PTY] Foreground process ended:', instance.foregroundProcess)
-      instance.foregroundProcess = null
-      instance.foregroundProcessPid = null
-      instance.lastPolledPid = null
-    }
-
-    // 没有前台进程或进程已结束，执行异步检测
-    const processInfo = await detectForegroundProcessAsync(instance.pty.pid)
-
-    if (processInfo) {
-      // 缓存进程信息
-      instance.foregroundProcess = processInfo.name
-      instance.foregroundProcessPid = processInfo.pid
-      instance.lastPolledPid = processInfo.pid  // Phase 2: 用于下次智能跳过
-      this.safeSend('terminal:process', {
-        id,
-        process: processInfo.name,
-        pid: processInfo.pid,
-        cwd: processInfo.cwd
-      })
-      console.log('[PTY] Detected foreground process:', processInfo.name, 'pid:', processInfo.pid)
-      return
     }
 
     // 没有前台进程，正常更新路径 — 使用 getBufferTail 替代整个 buffer
@@ -484,7 +522,7 @@ export class PtyService {
     if (cwd && cwd !== instance.cwd && this.isValidCwdPath(cwd)) {
       console.log('[PTY] CWD updated from', instance.cwd, 'to', cwd)
       instance.cwd = cwd
-      this.safeSend('terminal:cwd', { id, cwd })
+      this.safeSend(`terminal:cwd:${id}`, cwd)
     }
   }
 
@@ -620,44 +658,70 @@ export class PtyService {
 
   resize(id: string, cols: number, rows: number): void {
     const instance = this.instances.get(id)
-    if (instance) {
-      instance.pty.resize(cols, rows)
+    if (!instance) return
+    // 钳制到安全下限：拒绝 0 / NaN / 负数，避免极端尺寸把 conpty 弄崩导致进程退出
+    const safeCols = Math.max(1, Math.floor(Number(cols)) || 1)
+    const safeRows = Math.max(1, Math.floor(Number(rows)) || 1)
+    try {
+      instance.pty.resize(safeCols, safeRows)
+    } catch {
+      // 进程可能已退出；静默忽略，避免影响主流程
+    }
+  }
+
+  /**
+   * 统一清理单个终端的簿记资源（不含杀进程）
+   * 供 destroy()（用户关闭）和 onExit()（进程自然退出）共用，
+   * 避免自然退出时遗漏清理导致 pollQueue / 各类 Map 孤立累积
+   */
+  private cleanupTerminalResources(id: string): void {
+    // 从轮询队列中移除
+    const index = this.pollQueue.indexOf(id)
+    if (index !== -1) {
+      this.pollQueue.splice(index, 1)
+      if (this.currentPollIndex >= index && this.currentPollIndex > 0) {
+        this.currentPollIndex--
+      }
+    }
+
+    // 清理数据合并缓冲（同时发送残留数据并清掉自身的 timer/buffer）
+    this.flushBatch(id)
+
+    // 清理 OSC 解析缓冲
+    const oscTimer = this.oscParseTimers.get(id)
+    if (oscTimer) {
+      clearTimeout(oscTimer)
+      this.oscParseTimers.delete(id)
+    }
+    this.oscParseBuffers.delete(id)
+
+    // 清理速率监控
+    this.rateMonitors.delete(id)
+
+    // 清理进程检测时间记录
+    this.lastDetectionTime.delete(id)
+
+    // 清理并发检测标记
+    this.detectingPids.delete(id)
+
+    // 清理状态防抖器（reset 清掉待触发的 50ms timer，避免对已删实例的回调）
+    const debouncer = this.stateDebouncers.get(id)
+    if (debouncer) {
+      debouncer.reset()
+      this.stateDebouncers.delete(id)
+    }
+
+    // 如果没有终端了，停止全局轮询器（必须在移除队列项之后判断）
+    if (this.pollQueue.length === 0) {
+      this.stopGlobalPoller()
     }
   }
 
   destroy(id: string): void {
     const instance = this.instances.get(id)
     if (instance) {
-      // 从轮询队列中移除
-      const index = this.pollQueue.indexOf(id)
-      if (index !== -1) {
-        this.pollQueue.splice(index, 1)
-        if (this.currentPollIndex >= index && this.currentPollIndex > 0) {
-          this.currentPollIndex--
-        }
-      }
-
-      // 清理数据合并缓冲
-      this.flushBatch(id)
-
-      // 清理 OSC 解析缓冲
-      const oscTimer = this.oscParseTimers.get(id)
-      if (oscTimer) {
-        clearTimeout(oscTimer)
-        this.oscParseTimers.delete(id)
-      }
-      this.oscParseBuffers.delete(id)
-
-      // 清理速率监控
-      this.rateMonitors.delete(id)
-
-      // 清理进程检测时间记录
-      this.lastDetectionTime.delete(id)
-
-      // 如果没有终端了，停止全局轮询器
-      if (this.pollQueue.length === 0) {
-        this.stopGlobalPoller()
-      }
+      // 统一簿记清理
+      this.cleanupTerminalResources(id)
 
       // 递归终止进程树
       const pid = instance.pty.pid
@@ -665,8 +729,6 @@ export class PtyService {
 
       instance.pty.kill()
       this.instances.delete(id)
-      this.detectingPids.delete(id)
-      this.stateDebouncers.delete(id)
       console.log('[PTY] Terminal destroyed:', id)
     }
   }

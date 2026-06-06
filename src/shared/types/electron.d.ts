@@ -38,8 +38,9 @@ declare global {
         write: (id: string, data: string) => void;
         resize: (id: string, cols: number, rows: number) => Promise<void>;
         destroy: (id: string) => Promise<void>;
-        onData: (callback: (id: string, data: string) => void) => () => void;
-        onExit: (callback: (id: string, exitCode: number) => void) => () => void;
+        onData: (id: string, callback: (data: string) => void) => () => void;
+        onExit: (id: string, callback: (info: { exitCode: number; signal?: number }) => void) => () => void;
+        onCwd: (id: string, callback: (cwd: string) => void) => () => void;
       };
 
       // Config management (legacy)
