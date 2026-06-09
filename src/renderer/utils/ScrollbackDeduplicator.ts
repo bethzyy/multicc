@@ -11,6 +11,24 @@
  * 间隔通常数秒甚至数十秒，时间窗口会导致去重完全失效。
  */
 
+/**
+ * 提取一段数据中"最后一个"光标显隐控制码（DECTCEM）。
+ *
+ * 去重器丢弃整块重复写入时，会连同块内的 ?25l(隐藏光标)/?25h(显示光标) 一起丢掉。
+ * 但光标可见性是终端的 *状态*：若先写入的帧把光标留在隐藏态，而随后携带 ?25h 的帧
+ * 又被判为重复丢弃，光标就会永久消失（"有时光标不见了"的根因）。
+ *
+ * 丢弃前调用本函数取出块内最后一次显隐意图补写回终端，即可让光标可见性与应用真实
+ * 意图保持同步——重复的可见文本仍被抑制，但状态码不再丢失。
+ * 返回 '' 表示该块不含光标显隐码，无需补写。
+ */
+export function lastCursorVisibility(data: string): string {
+  const hide = data.lastIndexOf('\x1b[?25l')
+  const show = data.lastIndexOf('\x1b[?25h')
+  if (hide < 0 && show < 0) return ''
+  return show > hide ? '\x1b[?25h' : '\x1b[?25l'
+}
+
 export class ScrollbackDeduplicator {
   private lineHashes: string[] = []
   private readonly maxSize: number

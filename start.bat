@@ -6,25 +6,18 @@ echo.
 
 cd /d "%~dp0"
 
-:: 检查 Node.js
-where node >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [错误] 未找到 Node.js，请先安装 Node.js v20 或更高版本
+:: 自动查找 dist 目录中最新的便携版 exe（排除 Setup 安装包和 blockmap）
+set "LATEST="
+for /f "delims=" %%f in ('dir /b /a-d /o-d "dist\MultiCC*.exe" 2^>nul ^| findstr /v /i "Setup blockmap"') do (
+    if not defined LATEST set "LATEST=%%f"
+)
+
+if not defined LATEST (
+    echo [错误] 未在 dist 目录找到打包好的 MultiCC 便携版 exe
+    echo [提示] 请先执行 npm run build:win 进行打包
     pause
     exit /b 1
 )
 
-:: 检查 node_modules
-if not exist "node_modules" (
-    echo [信息] 首次运行，正在安装依赖...
-    npm install --ignore-scripts
-    if %errorlevel% neq 0 (
-        echo [错误] 依赖安装失败
-        pause
-        exit /b 1
-    )
-)
-
-:: 启动开发模式（使用 VBScript 隐藏窗口）
-echo [信息] 启动 MultiCC...
-cscript //nologo "%~dp0launch.vbs"
+echo [信息] 启动最新版: %LATEST%
+start "" "dist\%LATEST%"

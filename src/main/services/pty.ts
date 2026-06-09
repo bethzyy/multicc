@@ -1,7 +1,8 @@
 import * as pty from '@lydell/node-pty'
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, app } from 'electron'
 import { exec, execSync } from 'child_process'
 import * as fs from 'fs'
+import * as path from 'path'
 import { promisify } from 'util'
 import {
   parseOscSequences,
@@ -15,6 +16,56 @@ import { detectForegroundProcessAsync, getChildPidsAsync } from './terminal/Wind
 import { OutputRateMonitor } from './terminal/OutputRateMonitor'
 
 const execAsync = promisify(exec)
+
+// ── 原始 PTY I/O 调试日志（默认关闭，排查 CJK 插空格/光标错位等问题用）──
+// 启用：设置环境变量 MULTICC_PTY_LOG=1 再启动应用（如 start.bat 里 set MULTICC_PTY_LOG=1）。
+// 日志位置：%APPDATA%/multicc/pty-debug.log。
+// IN  = 渲染端发给 PTY 的用户输入（如键入/IME 提交的字节）。
+// OUT = PTY/子进程回显给渲染端的输出（去重之前的完整流）。
+// 空格显示为 ␠、ESC 显示为 \e，便于一眼看出"莫名空格"到底来自输入还是回显。
+const PTY_LOG_ENABLED = process.env.MULTICC_PTY_LOG === '1'
+let ptyLogPath: string | null = null
+function ptyLogFile(): string {
+  if (!ptyLogPath) {
+    try {
+      ptyLogPath = path.join(app.getPath('userData'), 'pty-debug.log')
+    } catch {
+      ptyLogPath = path.join(process.cwd(), 'pty-debug.log')
+    }
+  }
+  return ptyLogPath
+}
+function escapeForLog(s: string): string {
+  let out = ''
+  for (const ch of s) {
+    const code = ch.codePointAt(0)!
+    if (ch === '\x1b') out += '\\e'
+    else if (ch === '\r') out += '\\r'
+    else if (ch === '\n') out += '\\n'
+    else if (ch === ' ') out += '␠'
+    else if (code < 0x20 || code === 0x7f) out += '\\x' + code.toString(16).padStart(2, '0')
+    else out += ch
+  }
+  return out
+}
+function ptyDebugLog(direction: 'IN' | 'OUT', id: string, data: string): void {
+  if (!PTY_LOG_ENABLED) return
+  try {
+    fs.appendFileSync(ptyLogFile(), `[${direction} ${id} len=${data.length}] ${escapeForLog(data)}\n`)
+  } catch {
+    // 日志失败不影响终端
+  }
+}
+// 把 PTY 拿到的尺寸（create / resize 时的 cols×rows）也写进同一个日志文件，
+// 便于把"PTY 实际宽度"与"Claude OUT 字节里按某宽度寻址"做对照（排查 CJK 插空格根因）。
+function ptyDebugMeta(id: string, msg: string): void {
+  if (!PTY_LOG_ENABLED) return
+  try {
+    fs.appendFileSync(ptyLogFile(), `[META ${id}] ${msg}\n`)
+  } catch {
+    // 日志失败不影响终端
+  }
+}
 
 interface PtyInstance {
   pty: pty.IPty
@@ -243,8 +294,14 @@ export class PtyService {
       }
       let ptyProcess: pty.IPty
       try {
-        ptyProcess = pty.spawn(shell, [], { ...baseOptions, useConpty: true })
-        console.log('[PTY] Backend: ConPTY (true color)')
+        // useConptyDll: 使用 node-pty 自带的新 conpty.dll，而非 Windows 内置的老 conpty。
+        // Win10(如 19045)内置 conpty 在重排「TUI 光标寻址 + CJK 宽字符」时会插入多余 \x08 退格，
+        // 导致 Claude Code 输入框首个中文字符后凭空多出一个空格、并伴随光标残块。
+        // 新 dll 修复此问题，且仍保留 ConPTY 的 24-bit 真彩色（winpty 回退会把真彩色压成 16 色）。
+        // 注意：打包时必须把 @lydell/node-pty-win32-* 的 prebuilds 解包出 asar（见 package.json asarUnpack），
+        // 否则运行时加载不到 conpty.dll/OpenConsole.exe，会异常并回退 winpty。
+        ptyProcess = pty.spawn(shell, [], { ...baseOptions, useConpty: true, useConptyDll: true })
+        console.log('[PTY] Backend: ConPTY (true color, bundled conpty.dll)')
       } catch (conptyErr) {
         const msg = conptyErr instanceof Error ? conptyErr.message : String(conptyErr)
         console.warn('[PTY] ConPTY failed, falling back to winpty:', msg)
@@ -253,6 +310,7 @@ export class PtyService {
       }
 
       console.log('[PTY] Process created, PID:', ptyProcess.pid)
+      ptyDebugMeta(id, `create cols=${cols} rows=${rows} pid=${ptyProcess.pid}`)
 
       // Create state debouncer for this terminal
       const debouncer = new StateChangeDebouncer(50)
@@ -265,6 +323,7 @@ export class PtyService {
       // 监听输出 — 自适应处理
       ptyProcess.onData((data: string) => {
         if (this.isShuttingDown) return
+        ptyDebugLog('OUT', id, data)
         const instance = this.instances.get(id)
         if (!instance) {
           this.batchSendData(id, data)
@@ -668,6 +727,7 @@ export class PtyService {
   }
 
   write(id: string, data: string): void {
+    ptyDebugLog('IN', id, data)
     const instance = this.instances.get(id)
     if (instance) {
       // 用户输入时从 waiting_input 切回 running（参考 muxvo manager.ts）
@@ -693,6 +753,7 @@ export class PtyService {
     // 钳制到安全下限：拒绝 0 / NaN / 负数，避免极端尺寸把 conpty 弄崩导致进程退出
     const safeCols = Math.max(1, Math.floor(Number(cols)) || 1)
     const safeRows = Math.max(1, Math.floor(Number(rows)) || 1)
+    ptyDebugMeta(id, `resize cols=${safeCols} rows=${safeRows}`)
     try {
       instance.pty.resize(safeCols, safeRows)
     } catch {

@@ -126,8 +126,10 @@ function registerIpcHandlers() {
         console.warn('[Main] terminal:create rejected: invalid cwd', { cwd })
         return false
       }
-      console.log('[Main] terminal:create called:', { id, cols, rows, cwd })
-      return ptyService.create(id, cols, rows, cwd)
+      // cwd 为空时使用配置的默认工作目录，避免便携版回退到临时解压目录
+      const resolvedCwd = (cwd && cwd.length > 0) ? cwd : configService.getDefaultWorkingDir()
+      console.log('[Main] terminal:create called:', { id, cols, rows, cwd: resolvedCwd })
+      return ptyService.create(id, cols, rows, resolvedCwd)
     } catch (error) {
       console.error('[Main] terminal:create error:', error)
       return false

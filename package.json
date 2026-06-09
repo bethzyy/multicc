@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.3",
-    "electron": "^40.9.1",
     "electron-store": "^10.0.0",
     "electron-updater": "^6.8.3",
     "react": "^19.0.0",
@@ -35,6 +34,7 @@
     "@types/react-dom": "^19.0.0",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^40.9.1",
     "electron-builder": "^25.0.0",
     "electron-vite": "^2.3.0",
     "typescript": "^5.9.0",
@@ -49,6 +49,9 @@
     "files": [
       "out/**/*",
       "resources/**/*"
+    ],
+    "asarUnpack": [
+      "**/@lydell/node-pty-win32-*/**"
     ],
     "win": {
       "target": [

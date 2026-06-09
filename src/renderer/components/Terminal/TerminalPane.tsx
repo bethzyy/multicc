@@ -7,7 +7,7 @@ import { WebglAddon } from 'xterm-addon-webgl'
 import 'xterm/css/xterm.css'
 import { TerminalInstance } from '../../App'
 import { getXTermTheme } from '../../hooks/useTheme'
-import { ScrollbackDeduplicator } from '../../utils/ScrollbackDeduplicator'
+import { ScrollbackDeduplicator, lastCursorVisibility } from '../../utils/ScrollbackDeduplicator'
 import { WorktreePopover } from '../Worktree/WorktreePopover'
 
 interface TerminalPaneProps {
@@ -37,6 +37,19 @@ function getScrollback(): number {
     // localStorage 不可用时回退默认值
   }
   return DEFAULT_SCROLLBACK
+}
+
+// 去重开关（A/B 排查用）。ScrollbackDeduplicator 通过"整块丢弃重复写入"抑制经典渲染器
+// 把旧帧推进 scrollback 造成的镜像重复；但整块丢弃会连带丢掉块内的光标移动/显隐控制码，
+// 怀疑会造成光标错位（如 ↑ 调历史命令显示位置跑到上面）等渲染异常。
+// 默认开启；在 DevTools Console 执行 localStorage.setItem('multicc.dedup','off') 后重建终端即可关闭，
+// 用于验证某渲染异常是否由去重导致。
+function getDedupEnabled(): boolean {
+  try {
+    return localStorage.getItem('multicc.dedup') !== 'off'
+  } catch {
+    return true
+  }
 }
 
 // 格式化路径显示：显示最后两级
@@ -182,6 +195,14 @@ export function TerminalPane({
     let isDisposed = false
     const MAX_WRITE_PER_FRAME = 512 * 1024  // 512KB per frame max
     const deduplicator = new ScrollbackDeduplicator()
+    const dedupEnabled = getDedupEnabled()
+
+    // 用户刚输入后的"回显保护窗口"。去重器只该压制流式输出造成的重复 scrollback，
+    // 绝不能丢弃用户输入/删除的回显——否则编辑多行输入时整块重绘被判重丢弃，
+    // 会出现"打了字不显示/删了字没删掉/光标错位"。键入后 INPUT_ECHO_WINDOW_MS 内
+    // 到达的输出几乎必然是这次编辑的交互回显，期间一律照写不去重。
+    const INPUT_ECHO_WINDOW_MS = 250
+    let lastInputAt = 0
 
     const flushWrites = () => {
       rafId = 0
@@ -190,10 +211,27 @@ export function TerminalPane({
         if (pendingData.length > MAX_WRITE_PER_FRAME) {
           pendingData = pendingData.slice(-MAX_WRITE_PER_FRAME)
         }
-        // 检测 scrollback 重复内容并跳过写入
-        if (deduplicator.isDuplicate(pendingData)) {
-          pendingData = ''
-          return
+        // 检测 scrollback 重复内容并跳过写入（dedupEnabled=false 时整体跳过去重，便于 A/B 排查）
+        if (dedupEnabled) {
+          // 始终调用 isDuplicate 以持续记录行 hash（保证缓冲区状态正确），
+          // 但仅在"非用户刚输入"时才据其判定丢弃——保护交互回显不被误丢。
+          const dup = deduplicator.isDuplicate(pendingData)
+          const recentlyTyped = (performance.now() - lastInputAt) < INPUT_ECHO_WINDOW_MS
+          if (dup && !recentlyTyped) {
+            // 重复帧整块丢弃会连同块内的光标显隐码(?25l/?25h)一起丢掉，导致光标
+            // 显隐状态与应用意图失步（典型表现：光标偶发性永久消失）。丢弃前补写块内
+            // 最后一次光标显隐意图，确保光标可见性始终正确，同时仍抑制重复文本。
+            const cursorSeq = lastCursorVisibility(pendingData)
+            if (cursorSeq) {
+              try {
+                xterm.write(cursorSeq)
+              } catch {
+                // xterm 可能已销毁
+              }
+            }
+            pendingData = ''
+            return
+          }
         }
         try {
           xterm.write(pendingData)
@@ -213,6 +251,8 @@ export function TerminalPane({
 
     // 监听用户输入（发送到主进程）
     xterm.onData((data) => {
+      // 记录最近输入时刻，开启回显保护窗口（见 flushWrites 去重逻辑）
+      lastInputAt = performance.now()
       window.electron.terminal.write(terminal.id, data)
     })
 

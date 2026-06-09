@@ -32,7 +32,20 @@
       "mcp__zai-mcp-server__extract_text_from_screenshot",
       "Bash(git checkout:*)",
       "Bash(powershell:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(sed -E 's/<[^>]+>//g')",
+      "Bash(git -C D:/Gitrepo/multicc fetch origin)",
+      "Bash(git -C D:/Gitrepo/multicc status)",
+      "Bash(git -C D:/Gitrepo/multicc stash push -- .claude/settings.local.json)",
+      "Bash(git -C D:/Gitrepo/multicc pull --ff-only origin main)",
+      "Bash(git -C D:/Gitrepo/multicc stash pop)",
+      "Bash(git -C D:/Gitrepo/multicc show 83e033e:package.json)",
+      "Bash(findstr /C:\"react-markdown\" /C:\"remark\" /C:\"version\")",
+      "Bash(git *)",
+      "PowerShell(cmd /c \"D:\\\\Gitrepo\\\\multicc\\\\start.bat\")",
+      "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"D:\\\\Gitrepo\\\\multicc\\\\start.bat\"\\); \"Length: $\\($bytes.Length\\)\"; \"First 4 bytes: $\\($bytes[0..3] -join ','\\)\"; $raw = Get-Content -Raw \"D:\\\\Gitrepo\\\\multicc\\\\start.bat\"; $crlf = $raw.Contains\\(\"`r`n\"\\); \"Has CRLF: $crlf\")",
+      "PowerShell(Get-Process *)",
+      "PowerShell(\"E:\\\\ exists: $\\(Test-Path 'E:\\\\'\\)\"; $cfg = Join-Path $env:APPDATA 'multicc\\\\config.json'; \"config path: $cfg  exists: $\\(Test-Path $cfg\\)\"; if \\(Test-Path $cfg\\) { Get-Content -Raw $cfg })"
     ]
   },
   "hooks": {

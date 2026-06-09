@@ -6,6 +6,7 @@ import { StoreService } from './store'
 export interface AppConfig {
   claudePath: string
   workingDirs: string[]
+  defaultWorkingDir: string
   theme: 'dark' | 'light'
   fontSize: number
   fontFamily: string
@@ -14,6 +15,7 @@ export interface AppConfig {
 const DEFAULT_CONFIG: AppConfig = {
   claudePath: '',
   workingDirs: [],
+  defaultWorkingDir: 'E:\\',
   theme: 'dark',
   fontSize: 14,
   fontFamily: 'Consolas, "Courier New", monospace'
@@ -73,6 +75,25 @@ export class ConfigService {
   removeWorkingDir(path: string): void {
     const config = this.loadConfig()
     config.workingDirs = config.workingDirs.filter(p => p !== path)
+    this.saveConfig(config)
+  }
+
+  /**
+   * 新建终端的默认工作目录。
+   * 若配置的目录不存在（如换机器后 E: 盘缺失），回退到用户主目录，
+   * 避免便携版下回退到临时解压目录。
+   */
+  getDefaultWorkingDir(): string {
+    const dir = this.loadConfig().defaultWorkingDir
+    if (dir && existsSync(dir)) {
+      return dir
+    }
+    return app.getPath('home')
+  }
+
+  setDefaultWorkingDir(path: string): void {
+    const config = this.loadConfig()
+    config.defaultWorkingDir = path
     this.saveConfig(config)
   }
 
