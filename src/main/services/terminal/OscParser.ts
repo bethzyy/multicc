@@ -154,6 +154,22 @@ export function detectBellSignal(data: string): boolean {
   return withoutOsc.includes('\x07')
 }
 
+// 终端自动生成的上报序列（非用户敲键）：focus 上报、鼠标上报、光标位置(DSR)响应。
+// 点击/聚焦 pane 时，开启 focus-reporting(?1004h)/鼠标追踪的 TUI 会经 xterm.onData 自动发出这些。
+// eslint-disable-next-line no-control-regex
+const TERMINAL_REPORT_RE = /\x1b\[[IO]|\x1b\[<\d+;\d+;\d+[Mm]|\x1b\[M[\s\S]{3}|\x1b\[\d+;\d+R/g
+
+/**
+ * 判断一段经 xterm.onData 上来的数据是否包含「真实用户键入」。
+ * 点击/聚焦 pane 时，开启了 focus-reporting(?1004h)/鼠标追踪的 TUI 会通过 onData
+ * 自动发出 focus/鼠标上报序列——它们不是用户敲键，不应解除红灯(waiting_input)。
+ * 剥掉这些自动上报后仍有剩余内容，才算真实输入（方向键 \x1b[A、回车 \r、普通字符、
+ * 括号粘贴 \x1b[200~… 都不在剥离列表内，会被正确判为真实输入）。
+ */
+export function isRealUserInput(data: string): boolean {
+  return data.replace(TERMINAL_REPORT_RE, '').length > 0
+}
+
 /**
  * WaitingInput detection — ported from muxvo input-detector.ts
  *

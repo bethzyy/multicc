@@ -10,7 +10,8 @@ import {
   StateChangeDebouncer,
   detectBellSignal,
   detectWaitingInputDetailed,
-  resetInputDetector
+  resetInputDetector,
+  isRealUserInput
 } from './terminal/OscParser'
 import { detectForegroundProcessAsync, getChildPidsAsync } from './terminal/WindowsProcessDetector'
 import { OutputRateMonitor } from './terminal/OutputRateMonitor'
@@ -749,8 +750,10 @@ export class PtyService {
     ptyDebugLog('IN', id, data)
     const instance = this.instances.get(id)
     if (instance) {
-      // 用户输入时从 waiting_input 切回 running（参考 muxvo manager.ts）
-      if (instance.state === 'waiting_input') {
+      // 用户输入时从 waiting_input 切回 running（参考 muxvo manager.ts）。
+      // 仅在 data 含真实键入时解除红灯：点击/聚焦 pane 时 TUI(?1004h/鼠标追踪)会经
+      // xterm.onData 自动发出 focus/鼠标上报，这些不是敲键，不应让红灯变绿。
+      if (instance.state === 'waiting_input' && isRealUserInput(data)) {
         ptyStateLog(id, 'waiting_input -> running (user-input)')
         instance.state = 'running'
         resetInputDetector(id)
