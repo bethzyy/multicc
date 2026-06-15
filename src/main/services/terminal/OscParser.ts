@@ -193,11 +193,76 @@ const EXCLUDE_PATTERNS = [
   /^(INFO|WARN|ERROR|DEBUG)/i, // Log lines
 ]
 
+/**
+ * 去边框归一化：Claude Code 等 TUI 的提示框用 │┃║| 把每行包起来，
+ * 例如 "│ Do you want to proceed?      │"，问号后面还有空格 + 边框，
+ * 导致 /\?\s*$/m 等行尾锚定的模式永远匹配不到。这里去掉每行首尾的
+ * 边框字符与空白，使问句能真正落在行尾。
+ */
+function normalizeBorders(clean: string): string {
+  return clean
+    .split('\n')
+    .map(line => line.replace(/^[\s│┃║|]+/, '').replace(/[\s│┃║|]+$/, ''))
+    .join('\n')
+}
+
+/** detectWaitingInput 的判定结果，reason 标明命中/未命中的具体原因，便于日志排查与测试断言 */
+export interface WaitingInputResult {
+  matched: boolean
+  /** 'esc-cancel' | 'numbered+question' | 'question-line+numbered' | `generic:${i}` | 'excluded' | 'none' */
+  reason: string
+}
+
+/**
+ * 纯函数版等待输入判定——不依赖滚动缓冲/terminalId，输入一段（可含 ANSI 的）原始文本，
+ * 返回是否命中及命中原因。所有正则匹配逻辑集中于此，便于单元测试覆盖各种提示框格式。
+ */
+export function matchWaitingInputText(rawText: string): WaitingInputResult {
+  const normalized = normalizeBorders(stripAnsi(rawText))
+
+  // 1. "Esc to cancel" (Claude Code specific, highest precision)
+  if (ESC_CANCEL_PATTERN.test(normalized)) {
+    return { matched: true, reason: 'esc-cancel' }
+  }
+
+  // Check exclusions only against the tail (recent output)
+  const tail = normalized.slice(-300)
+  for (const exclude of EXCLUDE_PATTERNS) {
+    if (exclude.test(tail)) return { matched: false, reason: 'excluded' }
+  }
+
+  // 2. 数字选择器 + 问句。强信号 "❯ N." 是交互式菜单（Claude Code 批准框等）
+  // 的典型特征，只要同时出现"任意位置的问号"即判定——覆盖问句与选项不在同一行、
+  // 或问句被边框拆行的情况，不再要求问号严格落在行尾。
+  if (NUMBERED_OPTION_PATTERN.test(normalized) && /\?/.test(normalized)) {
+    return { matched: true, reason: 'numbered+question' }
+  }
+
+  // 2b. 兼容旧逻辑：行尾问句 + 数字选择器
+  if (QUESTION_LINE_PATTERN.test(normalized) && NUMBERED_OPTION_PATTERN.test(normalized)) {
+    return { matched: true, reason: 'question-line+numbered' }
+  }
+
+  // 3. Generic patterns
+  for (let i = 0; i < GENERIC_PATTERNS.length; i++) {
+    if (GENERIC_PATTERNS[i].test(normalized)) {
+      return { matched: true, reason: `generic:${i}` }
+    }
+  }
+
+  return { matched: false, reason: 'none' }
+}
+
 // Per-terminal rolling buffers (same as muxvo)
 const inputBuffers = new Map<string, string>()
 const ROLLING_MAX = 2000
 
-export function detectWaitingInput(data: string, terminalId: string): boolean {
+/**
+ * 带滚动缓冲的等待输入检测（返回详细结果，供日志记录命中原因）。
+ * 滚动缓冲用于处理被拆成多个 chunk 的提示框——Claude Code 的 TUI 输出常把
+ * 单个提示框拆成几十个小 chunk，没有滚动缓冲就永远凑不齐完整提示去匹配。
+ */
+export function detectWaitingInputDetailed(data: string, terminalId: string): WaitingInputResult {
   const key = terminalId
 
   // Append to per-terminal rolling buffer
@@ -208,36 +273,16 @@ export function detectWaitingInput(data: string, terminalId: string): boolean {
   }
   inputBuffers.set(key, updated)
 
-  // Strip ANSI codes for clean matching
-  const clean = stripAnsi(updated)
-
-  // 1. "Esc to cancel" (Claude Code specific, highest precision)
-  if (ESC_CANCEL_PATTERN.test(clean)) {
+  const result = matchWaitingInputText(updated)
+  if (result.matched) {
     inputBuffers.delete(key)
-    return true
   }
+  return result
+}
 
-  // Check exclusions only against the tail (recent output)
-  const tail = clean.slice(-300)
-  for (const exclude of EXCLUDE_PATTERNS) {
-    if (exclude.test(tail)) return false
-  }
-
-  // 2. Combo: question + numbered selector
-  if (QUESTION_LINE_PATTERN.test(clean) && NUMBERED_OPTION_PATTERN.test(clean)) {
-    inputBuffers.delete(key)
-    return true
-  }
-
-  // 3. Generic patterns
-  for (const pattern of GENERIC_PATTERNS) {
-    if (pattern.test(clean)) {
-      inputBuffers.delete(key)
-      return true
-    }
-  }
-
-  return false
+/** 带滚动缓冲的等待输入检测（布尔版，保持原有调用方兼容） */
+export function detectWaitingInput(data: string, terminalId: string): boolean {
+  return detectWaitingInputDetailed(data, terminalId).matched
 }
 
 /** Reset the rolling buffer for a specific terminal */

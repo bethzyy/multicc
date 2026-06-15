@@ -396,7 +396,13 @@ body {
   transition: background-color 150ms ease;
 }
 .terminal-status-dot.running { background: #4ade80; box-shadow: 0 0 6px #4ade80; animation: statusPulse 2s ease-in-out infinite; }
-.terminal-status-dot.waiting { background: #ef4444; box-shadow: 0 0 10px #ef4444, 0 0 20px rgba(239, 68, 68, 0.4); animation: statusPulse 1s ease-in-out infinite; }
+.terminal-status-dot.waiting {
+  width: 20px;
+  height: 20px;
+  background: #ef4444;
+  box-shadow: 0 0 10px #ef4444, 0 0 20px rgba(239, 68, 68, 0.4);
+  animation: statusPulse 1s ease-in-out infinite;
+}
 .terminal-status-dot.idle { background: #555; }
 
 .terminal-waiting-badge {

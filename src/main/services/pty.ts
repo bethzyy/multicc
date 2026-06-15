@@ -9,7 +9,7 @@ import {
   extractLatestCwd,
   StateChangeDebouncer,
   detectBellSignal,
-  detectWaitingInput,
+  detectWaitingInputDetailed,
   resetInputDetector
 } from './terminal/OscParser'
 import { detectForegroundProcessAsync, getChildPidsAsync } from './terminal/WindowsProcessDetector'
@@ -62,6 +62,17 @@ function ptyDebugMeta(id: string, msg: string): void {
   if (!PTY_LOG_ENABLED) return
   try {
     fs.appendFileSync(ptyLogFile(), `[META ${id}] ${msg}\n`)
+  } catch {
+    // 日志失败不影响终端
+  }
+}
+// 红绿灯状态机日志（同样受 MULTICC_PTY_LOG=1 控制）。
+// 记录每次状态迁移与等待输入检测的命中原因，排查"该红不红/该绿不绿"时
+// 直接看 %APPDATA%/multicc/pty-debug.log 里的 [STATE ...] 行，不靠猜。
+function ptyStateLog(id: string, msg: string): void {
+  if (!PTY_LOG_ENABLED) return
+  try {
+    fs.appendFileSync(ptyLogFile(), `[STATE ${id}] ${msg}\n`)
   } catch {
     // 日志失败不影响终端
   }
@@ -341,6 +352,10 @@ export class PtyService {
         rateMonitor.recordChunk(data.length)
 
         // --- OSC processing: adaptive ---
+        // 注意：oscParseBuffers 仅供 processTerminalOutput 解析 cwd/标题/状态，
+        // 是 parse-only 缓冲，不喂渲染进程——发往渲染进程的始终是下方
+        // batchSendData(id, data) 的原始 chunk。此处的 slice 截断最坏只丢一次
+        // cwd 解析，不会损坏终端显示。
         if (rateMonitor.isHeavyOutput) {
           // 重负载模式：累积数据，定时解析
           const buf = this.oscParseBuffers.get(id) || ''
@@ -375,6 +390,7 @@ export class PtyService {
         if (!this.instances.has(id)) return
         console.log('[PTY] Process exited:', id, 'code:', exitCode, 'signal:', signal)
         // 发送 idle 状态（让前端显示灰色灯）。退出是终态，不需要防抖，直接发送。
+        ptyStateLog(id, `${this.instances.get(id)?.state ?? '?'} -> idle (process-exit)`)
         this.safeSend(`terminal:state:${id}`, 'idle')
         // 进程自然退出：先 cleanupTerminalResources（内含 flushBatch，把退出前最后一行
         // 输出发给渲染端）再发 exit，保证最后输出先于「终端已关闭」显示。此处不杀进程（已自行退出）。
@@ -436,8 +452,9 @@ export class PtyService {
     if (!debouncer) return
 
     // 统一状态发送（通过 debouncer）
-    const sendState = (newState: string) => {
+    const sendState = (newState: string, reason: string) => {
       if (instance.state !== newState) {
+        ptyStateLog(id, `${instance.state} -> ${newState} (${reason})`)
         instance.state = newState
         debouncer.notify(newState, (s) => {
           this.safeSend(`terminal:state:${id}`, s)
@@ -455,7 +472,7 @@ export class PtyService {
     // 参考 muxvo：muxvo 完全不处理 OSC133 状态，我们保留但加保护
     if (instance.state !== 'waiting_input') {
       if (commandStarted) {
-        sendState('busy')
+        sendState('busy', 'osc133:commandStart')
         instance.foregroundProcess = 'pending'
 
         // 前台进程检测（默认关闭，见 FOREGROUND_DETECTION_ENABLED）
@@ -474,21 +491,23 @@ export class PtyService {
       } else if (commandEnded) {
         instance.foregroundProcess = null
         instance.foregroundProcessPid = null
-        sendState('running')
+        sendState('running', 'osc133:commandEnd')
       } else if (isPromptReady) {
-        sendState('running')
+        sendState('running', 'osc133:promptReady')
       }
     }
 
-    // WaitingInput 检测：只在 Running 状态下触发（参考 muxvo manager.ts L233）
+    // WaitingInput 检测：Running 或 Busy 状态下触发（参考 muxvo manager.ts L233）
+    // 注意 Busy 也要检测：shell 启用 OSC133 时，运行 claude 会让状态停在 Busy，
+    // 此时若漏检则 Busy→WaitingInput 永远不会发生（红灯失效）
     // 1. 独立 BEL 信号（排除 OSC 终止符中的 BEL）
     // 2. 滚动缓冲区文本模式匹配（"Esc to cancel"、y/n 提示等）
-    if (instance.state === 'running') {
+    if (instance.state === 'running' || instance.state === 'busy') {
       const hasBell = detectBellSignal(data)
-      const textDetected = detectWaitingInput(data, id)
-      if (hasBell || textDetected) {
+      const detection = detectWaitingInputDetailed(data, id)
+      if (hasBell || detection.matched) {
         resetInputDetector(id)
-        sendState('waiting_input')
+        sendState('waiting_input', hasBell ? 'bell' : `text:${detection.reason}`)
       }
     }
   }
@@ -732,6 +751,7 @@ export class PtyService {
     if (instance) {
       // 用户输入时从 waiting_input 切回 running（参考 muxvo manager.ts）
       if (instance.state === 'waiting_input') {
+        ptyStateLog(id, 'waiting_input -> running (user-input)')
         instance.state = 'running'
         resetInputDetector(id)
         const debouncer = this.stateDebouncers.get(id)
