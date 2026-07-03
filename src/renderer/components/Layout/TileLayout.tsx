@@ -8,6 +8,7 @@ interface TileLayoutProps {
   onCloseTerminal: (id: string) => void
   onRenameTerminal: (id: string, name: string) => void
   onFocusTerminal: (id: string) => void
+  onMinimizeTerminal: (id: string) => void
   onTerminalStateChange: (id: string, state: string) => void
   onTerminalCwdChange: (id: string, cwd: string) => void
   onOpenWorktree: (path: string) => void
@@ -22,6 +23,7 @@ export function TileLayout({
   onCloseTerminal,
   onRenameTerminal,
   onFocusTerminal,
+  onMinimizeTerminal,
   onTerminalStateChange,
   onTerminalCwdChange,
   onOpenWorktree,
@@ -69,6 +71,7 @@ export function TileLayout({
               onClose={() => onCloseTerminal(terminal.id)}
               onRename={(name) => onRenameTerminal(terminal.id, name)}
               onFocus={() => onFocusTerminal(terminal.id)}
+              onMinimize={() => onMinimizeTerminal(terminal.id)}
               onStateChange={(state) => onTerminalStateChange(terminal.id, state)}
               onCwdChange={(cwd) => onTerminalCwdChange(terminal.id, cwd)}
               onOpenWorktree={onOpenWorktree}

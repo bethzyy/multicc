@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { TitleBar } from './components/TitleBar/TitleBar'
 import { TileLayout } from './components/Layout/TileLayout'
+import { MinimizedBar } from './components/Layout/MinimizedBar'
 import { ChatHistoryPanel } from './components/chat'
 import { ConfigBrowser } from './components/config'
 import { ToolsBrowser } from './components/tools'
@@ -58,6 +59,29 @@ function App() {
       return filtered
     })
   }, [focusedId])
+
+  // 最小化终端
+  const minimizeTerminal = useCallback((id: string) => {
+    setTerminals(prev => {
+      const next = prev.map(t => t.id === id ? { ...t, minimized: true } : t)
+      // 最小化的是当前焦点终端时，焦点移交给第一个可见终端
+      if (focusedId === id) {
+        const nextVisible = next.find(t => !t.minimized)
+        setFocusedId(nextVisible ? nextVisible.id : null)
+      }
+      return next
+    })
+    // 在聚焦模式中最小化聚焦终端时，退出聚焦模式回到平铺
+    if (focusMode && focusedId === id) {
+      setFocusMode(false)
+    }
+  }, [focusedId, focusMode])
+
+  // 恢复最小化的终端（恢复后设为焦点，有大格时自然进大格）
+  const restoreTerminal = useCallback((id: string) => {
+    setTerminals(prev => prev.map(t => t.id === id ? { ...t, minimized: false } : t))
+    setFocusedId(id)
+  }, [])
 
   // 聚焦终端
   const focusTerminal = useCallback((id: string) => {
@@ -139,6 +163,8 @@ function App() {
   }, [])
 
   const focusedTerminal = terminals.find(t => t.id === focusedId)
+  const minimizedTerminals = terminals.filter(t => t.minimized)
+  const allMinimized = terminals.length > 0 && minimizedTerminals.length === terminals.length
 
   // Handle resume session from chat history
   const handleResumeSession = useCallback(async (info: { sessionId: string; cwd: string; source: ChatSource; customTitle?: string }) => {
@@ -275,6 +301,7 @@ function App() {
             onCloseTerminal={closeTerminal}
             onRenameTerminal={renameTerminal}
             onFocusTerminal={focusTerminal}
+            onMinimizeTerminal={minimizeTerminal}
             onTerminalStateChange={handleTerminalStateChange}
             onTerminalCwdChange={handleTerminalCwdChange}
             onOpenWorktree={openWorktreeTerminal}
@@ -283,6 +310,13 @@ function App() {
             theme={theme}
           />
 
+          {/* 全部最小化时的提示（覆盖在网格区上方） */}
+          {allMinimized && (
+            <div className="all-minimized-hint">
+              <p>所有终端已最小化，点击下方任务栏恢复</p>
+            </div>
+          )}
+
           {/* 空状态 */}
           {terminals.length === 0 && (
             <div className="empty-state">
@@ -290,6 +324,9 @@ function App() {
               <button onClick={() => createTerminal()}>新建终端</button>
             </div>
           )}
+
+          {/* 底部最小化任务栏 */}
+          <MinimizedBar terminals={minimizedTerminals} onRestore={restoreTerminal} />
         </main>
       </div>
     </div>

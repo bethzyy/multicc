@@ -8,6 +8,7 @@ import 'xterm/css/xterm.css'
 import { TerminalInstance } from '../../App'
 import { getXTermTheme } from '../../hooks/useTheme'
 import { ScrollbackDeduplicator, lastCursorVisibility, containsStatefulSequences } from '../../utils/ScrollbackDeduplicator'
+import { formatCwd } from '../../utils/formatCwd'
 import { WorktreePopover } from '../Worktree/WorktreePopover'
 
 interface TerminalPaneProps {
@@ -15,6 +16,7 @@ interface TerminalPaneProps {
   onClose: () => void
   onRename: (name: string) => void
   onFocus: () => void
+  onMinimize: () => void
   onStateChange: (state: string) => void
   onCwdChange: (cwd: string) => void
   onOpenWorktree: (path: string) => void
@@ -52,17 +54,6 @@ function getDedupEnabled(): boolean {
   }
 }
 
-// 格式化路径显示：显示最后两级
-function formatCwd(cwd: string | null): string {
-  if (!cwd) return ''
-
-  const normalizedCwd = cwd.replace(/\\/g, '/')
-  const parts = normalizedCwd.split('/')
-  const filtered = parts.filter(p => p)
-  if (filtered.length <= 2) return cwd
-  return '.../' + filtered.slice(-2).join('/')
-}
-
 // 从 cwd 路径检测 worktree 项目信息
 function getWorktreeInfo(cwd: string): { projectName: string } | null {
   const markerPos = cwd.indexOf('/.worktrees/')
@@ -80,6 +71,7 @@ export function TerminalPane({
   onClose,
   onRename,
   onFocus,
+  onMinimize,
   onStateChange,
   onCwdChange,
   onOpenWorktree,
@@ -569,6 +561,17 @@ export function TerminalPane({
               </svg>
             </button>
           )}
+          {/* 最小化按钮 */}
+          <button
+            className="terminal-action-btn minimize-btn"
+            onClick={(e) => {
+              e.stopPropagation()
+              onMinimize()
+            }}
+            title="最小化"
+          >
+            ─
+          </button>
           {/* 聚焦按钮 */}
           {onToggleFocusMode && (
             <button

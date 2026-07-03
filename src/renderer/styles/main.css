@@ -281,6 +281,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .main-content.focus-mode {
@@ -582,6 +583,57 @@ body {
 
 .terminal-container .xterm-screen {
   cursor: text;
+}
+
+/* 全部最小化提示（覆盖在网格区上，不挡任务栏） */
+.all-minimized-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+/* 底部最小化任务栏 */
+.minimized-bar {
+  display: flex;
+  gap: 6px;
+  padding: 4px 8px;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.minimized-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.minimized-chip:hover {
+  border-color: var(--accent-color);
+}
+
+.minimized-chip-cwd {
+  color: var(--text-secondary);
+}
+
+/* 胶囊里的红灯不放大（复用 .terminal-status-dot 但压回小尺寸） */
+.minimized-chip .terminal-status-dot.waiting {
+  width: 10px;
+  height: 10px;
 }
 
 /* 空状态 */
