@@ -125,14 +125,16 @@ Renderer Process                              Main Process
 - OutputRateMonitor 高负载输出保护
 
 **TileLayout** (`src/renderer/components/Layout/TileLayout.tsx`):
-- CSS Grid 自动布局：1=全屏, 2=2列, 3-4=2x2
+- 动态网格布局（`utils/tileLayout.ts` 纯函数）：cols=ceil(sqrt(n))；有空洞时焦点终端占大格（第 1 列跨行）填满，交换而非重排
 - **聚焦模式**: 不卸载组件，用 CSS `display: none` 控制显隐
+- **最小化**: 同样不卸载，`display: none`；底部 MinimizedBar 胶囊点击恢复
 
 **ChatHistoryPanel** — 会话历史浏览、搜索、恢复
 **ConfigBrowser** — Skills/MCP/CLAUDE.md 配置浏览 + EN→ZH 翻译切换（ZhipuAI GLM-4-flash）+ 翻译缓存（SHA-256 hash, StoreService 持久化）
 **MarkdownContent** (`src/renderer/components/shared/MarkdownContent.tsx`) — react-markdown + remark-gfm 暗色主题渲染组件
 **MarketplaceView** — ClawHub Skill 市场（搜索/浏览/安装/卸载）
 **ToolsBrowser** — CLI 工具检测 + 自定义命令管理
+**MinimizedBar** (`src/renderer/components/Layout/MinimizedBar.tsx`) — 底部最小化任务栏（状态灯+名称+目录胶囊，点击恢复并聚焦）
 **UpdateNotification** — 自动更新提示和进度
 
 ### IPC API
@@ -175,6 +177,9 @@ window.electron.tools.detectCli() / getCustomCommands() / saveCustomCommand(...)
 
 // 更新
 window.electron.update.checkForUpdates() / downloadUpdate() / installUpdate()
+
+// 应用
+window.electron.app.setOverlayBadge(hasWaiting)  // 任务栏图标红点徽章
 ```
 
 ### Configuration
@@ -207,3 +212,4 @@ window.electron.update.checkForUpdates() / downloadUpdate() / installUpdate()
 | 粘贴内容截断 | 浏览器默认粘贴行为 | 使用 `xterm.paste()` API |
 | 重负载输出闪退 | 进程检测并发冲突 | OutputRateMonitor + IPC 数据合并缓冲 |
 | Installed 技能列表为空 | 未传 projectPath + 路径白名单过严 | 传 cwd + 扫描父目录 + 扩展白名单 |
+| 标题目录被 claude 输出污染/换目录重启不刷新 | 宽松正则全缓冲扫描猜 cwd | 行首锚定提示符解析 `parsePromptCwd`，无匹配即冻结 |
