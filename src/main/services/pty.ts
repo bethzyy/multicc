@@ -187,7 +187,7 @@ export class PtyService {
   }
 
   /**
-   * 从 buffer 数组中取尾部数据（给 parseCwdFromBuffer 用，它只需要最后几行）
+   * 从 buffer 数组中取尾部数据（给 parsePromptCwd 用，它只需要最后几行）
    */
   private getBufferTail(instance: PtyInstance, maxChars: number = 5000): string {
     const chunks = instance.bufferChunks
