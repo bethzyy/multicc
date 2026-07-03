@@ -16,6 +16,7 @@ export interface TerminalInstance {
   cwd: string
   isFocused: boolean
   state?: 'running' | 'waiting_input' | 'busy' | 'idle'
+  minimized?: boolean
 }
 
 function App() {

@@ -304,9 +304,20 @@ body {
   padding: 0;
 }
 
-/* 终端包装器 */
+/* 终端包装器：真网格项（承载 gridRow/gridColumn 跨格内联样式） */
 .terminal-wrapper {
-  display: contents;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+}
+
+.terminal-wrapper > .terminal-pane {
+  height: 100%;
+}
+
+/* 最小化：保持挂载但不显示、不占格 */
+.terminal-wrapper.minimized {
+  display: none;
 }
 
 .tile-layout.focus-mode-active .terminal-wrapper {
