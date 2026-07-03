@@ -9,6 +9,7 @@ import { TerminalInstance } from '../../App'
 import { getXTermTheme } from '../../hooks/useTheme'
 import { ScrollbackDeduplicator, lastCursorVisibility, containsStatefulSequences } from '../../utils/ScrollbackDeduplicator'
 import { formatCwd } from '../../utils/formatCwd'
+import { statusDotClass } from '../../utils/statusDotClass'
 import { WorktreePopover } from '../Worktree/WorktreePopover'
 
 interface TerminalPaneProps {
@@ -498,10 +499,7 @@ export function TerminalPane({
             />
           ) : (
             <>
-              <span className={`terminal-status-dot ${
-                terminal.state === 'waiting_input' ? 'waiting' :
-                terminal.state === 'running' || terminal.state === 'busy' ? 'running' : 'idle'
-              }`} />
+              <span className={`terminal-status-dot ${statusDotClass(terminal.state)}`} />
               {/* Worktree 项目徽章 */}
               {currentCwd && getWorktreeInfo(currentCwd) && (
                 <span className="terminal-worktree-badge">

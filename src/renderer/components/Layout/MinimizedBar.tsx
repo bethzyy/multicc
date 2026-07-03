@@ -1,5 +1,6 @@
 import { TerminalInstance } from '../../App'
 import { formatCwd } from '../../utils/formatCwd'
+import { statusDotClass } from '../../utils/statusDotClass'
 
 interface MinimizedBarProps {
   terminals: TerminalInstance[]
@@ -22,10 +23,7 @@ export function MinimizedBar({ terminals, onRestore }: MinimizedBarProps) {
           onClick={() => onRestore(t.id)}
           title={t.cwd || t.name}
         >
-          <span className={`terminal-status-dot ${
-            t.state === 'waiting_input' ? 'waiting' :
-            t.state === 'running' || t.state === 'busy' ? 'running' : 'idle'
-          }`} />
+          <span className={`terminal-status-dot ${statusDotClass(t.state)}`} />
           <span className="minimized-chip-name">{t.name}</span>
           {t.cwd && <span className="minimized-chip-cwd">{formatCwd(t.cwd)}</span>}
         </button>

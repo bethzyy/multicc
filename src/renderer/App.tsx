@@ -62,25 +62,24 @@ function App() {
 
   // 最小化终端
   const minimizeTerminal = useCallback((id: string) => {
-    setTerminals(prev => {
-      const next = prev.map(t => t.id === id ? { ...t, minimized: true } : t)
-      // 最小化的是当前焦点终端时，焦点移交给第一个可见终端
-      if (focusedId === id) {
-        const nextVisible = next.find(t => !t.minimized)
-        setFocusedId(nextVisible ? nextVisible.id : null)
-      }
-      return next
-    })
+    setTerminals(prev => prev.map(t => t.id === id ? { ...t, minimized: true } : t))
+    // 最小化的是当前焦点终端时，焦点移交给第一个可见终端
+    // 读当前 terminals（而非 setTerminals 的 prev），避免在 updater 内部调用其它状态 setter
+    if (focusedId === id) {
+      const nextVisible = terminals.find(t => t.id !== id && !t.minimized)
+      setFocusedId(nextVisible ? nextVisible.id : null)
+    }
     // 在聚焦模式中最小化聚焦终端时，退出聚焦模式回到平铺
     if (focusMode && focusedId === id) {
       setFocusMode(false)
     }
-  }, [focusedId, focusMode])
+  }, [focusedId, focusMode, terminals])
 
-  // 恢复最小化的终端（恢复后设为焦点，有大格时自然进大格）
+  // 恢复最小化的终端（恢复后设为焦点，退出聚焦模式回到平铺，有大格时自然进大格）
   const restoreTerminal = useCallback((id: string) => {
     setTerminals(prev => prev.map(t => t.id === id ? { ...t, minimized: false } : t))
     setFocusedId(id)
+    setFocusMode(false)
   }, [])
 
   // 聚焦终端

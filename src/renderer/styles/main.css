@@ -344,6 +344,14 @@ body {
   border-radius: 0;
 }
 
+/* 防御性规则：minimized 必须始终赢，不依赖「最小化聚焦终端时总会退出聚焦模式」这条 JS 层不变量。
+   特异性 (0,4,0) 匹配聚焦模式下最高特异性的显隐规则（.hidden / .focused-visible 均为 0,4,0），
+   且置于其后——同特异性时按源码顺序生效，故本规则必胜，保证 minimized 在聚焦模式规则
+   将来发生变化时依然可靠地隐藏，即使 focused-visible 与 minimized 同时命中同一 wrapper。 */
+.tile-layout.focus-mode-active .terminal-wrapper.minimized {
+  display: none;
+}
+
 /* 终端面板 */
 .terminal-pane {
   display: flex;
