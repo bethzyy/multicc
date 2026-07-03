@@ -15,6 +15,7 @@ import {
 } from './terminal/OscParser'
 import { detectForegroundProcessAsync, getChildPidsAsync } from './terminal/WindowsProcessDetector'
 import { OutputRateMonitor } from './terminal/OutputRateMonitor'
+import { parsePromptCwd } from './terminal/PromptCwdParser'
 
 const execAsync = promisify(exec)
 
@@ -116,7 +117,7 @@ export class PtyService {
   // 前台进程检测开关（默认关闭）
   // 关闭原因：detectForegroundProcessAsync / tasklist 会反复 spawn 子进程，
   // 但其产出的 terminal:state / terminal:process 事件目前没有任何渲染端消费者，
-  // 长时间运行会造成内存/句柄缓慢增长。cwd 显示仍由 parseCwdFromBuffer 驱动。
+  // 长时间运行会造成内存/句柄缓慢增长。cwd 显示仍由 parsePromptCwd 驱动。
   // 日后若要做 busy/前台进程 UI，将此开关置 true 并补上渲染端监听即可。
   private static readonly FOREGROUND_DETECTION_ENABLED: boolean = false
 
@@ -617,7 +618,7 @@ export class PtyService {
     }
 
     // 没有前台进程，正常更新路径 — 使用 getBufferTail 替代整个 buffer
-    const cwd = this.parseCwdFromBuffer(this.getBufferTail(instance))
+    const cwd = parsePromptCwd(this.getBufferTail(instance))
     if (cwd && cwd !== instance.cwd && this.isValidCwdPath(cwd)) {
       console.log('[PTY] CWD updated from', instance.cwd, 'to', cwd)
       instance.cwd = cwd
@@ -641,74 +642,6 @@ export class PtyService {
     } catch {
       return false
     }
-  }
-
-  /**
-   * Parse current working directory from terminal buffer
-   * Looks for common Windows path patterns in prompt
-   */
-  private parseCwdFromBuffer(buffer: string): string | null {
-    // 获取缓冲区的最后几行（通常包含提示符）
-    const lines = buffer.split('\n').slice(-5).join('\n')
-
-    // Windows cmd.exe 提示符模式: "C:\path\to\dir>" 或 "C:\path\to\dir $"
-    // PowerShell 模式: "PS C:\path\to\dir>"
-    const patterns = [
-      // cmd.exe: C:\path> or C:\path $ or C:\path>
-      /[A-Za-z]:\\[^\n<>$]*?(?=[\n>$])/g,
-      // PowerShell: PS C:\path>
-      /PS\s+([A-Za-z]:\\[^\n>]*)/g,
-      // Git Bash: user@host MINGW64 /c/path
-      /MINGW\d+\s+([\/\\][^\n$]*)/g,
-      // WSL: user@host:/path
-      /[\w@]+:([\/][^\n$]*)/g,
-    ]
-
-    // 查找最后一个匹配的路径
-    let lastMatch: string | null = null
-
-    for (const pattern of patterns) {
-      let match
-      while ((match = pattern.exec(lines)) !== null) {
-        const path = match[1] || match[0]
-        // 清理路径
-        const cleanPath = this.cleanPath(path)
-        if (cleanPath && this.isValidWindowsPath(cleanPath)) {
-          lastMatch = cleanPath
-        }
-      }
-    }
-
-    return lastMatch
-  }
-
-  /**
-   * Clean path string
-   * Enhanced to remove all ANSI/OSC sequences and control characters
-   */
-  private cleanPath(path: string): string {
-    return path
-      .trim()
-      .replace(/[>\s]+$/, '')           // 移除末尾的 > 和空格
-      .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')  // 移除所有 ANSI 转义序列（不只是颜色代码）
-      .replace(/\x1b\].*?[\x07\x1b\\]/g, '')  // 移除 OSC 序列
-      .replace(/\r/g, '')               // 移除回车
-      .replace(/[\x00-\x1f\x7f]/g, '')  // 移除控制字符
-  }
-
-  /**
-   * Check if path is a valid Windows path
-   */
-  private isValidWindowsPath(path: string): boolean {
-    // Windows 路径格式: C:\path 或 C:/path
-    if (/^[A-Za-z]:[\/\\]/.test(path)) {
-      return true
-    }
-    // Unix 风格路径 (WSL, Git Bash)
-    if (/^\/[a-zA-Z]/.test(path)) {
-      return true
-    }
-    return false
   }
 
   /**
