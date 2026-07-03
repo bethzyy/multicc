@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { TitleBar } from './components/TitleBar/TitleBar'
 import { TileLayout } from './components/Layout/TileLayout'
 import { MinimizedBar } from './components/Layout/MinimizedBar'
@@ -149,6 +149,17 @@ function App() {
       prev.map(t => t.id === id ? { ...t, cwd } : t)
     )
   }, [])
+
+  // 任一终端红灯（等待输入）→ 任务栏图标叠加红点；全部消除 → 恢复。
+  // 用 ref 去重：只在布尔值翻转时发 IPC，避免每次渲染都发。
+  const hasWaitingTerminal = terminals.some(t => t.state === 'waiting_input')
+  const prevWaitingRef = useRef(false)
+  useEffect(() => {
+    if (hasWaitingTerminal !== prevWaitingRef.current) {
+      prevWaitingRef.current = hasWaitingTerminal
+      window.electron.app.setOverlayBadge(hasWaitingTerminal).catch(() => {})
+    }
+  }, [hasWaitingTerminal])
 
   // 在 worktree 路径创建新终端
   const openWorktreeTerminal = useCallback((path: string) => {

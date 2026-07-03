@@ -49,6 +49,7 @@ export const IPC_CHANNELS = {
     GET_CONFIG: 'app:get-config',
     SAVE_CONFIG: 'app:save-config',
     GET_HOME_PATH: 'app:get-home-path',
+    SET_OVERLAY_BADGE: 'app:set-overlay-badge',
   },
 
   // Marketplace channels (ClawHub)

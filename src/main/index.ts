@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, nativeImage } from 'electron'
 import { join } from 'path'
 import { PtyService } from './services/pty'
 import { ConfigService } from './services/config'
@@ -34,6 +34,10 @@ let storeService: StoreService
 // 开发环境检测：以 electron-vite 设置的 ELECTRON_RENDERER_URL 为准。
 // 这样 npm run dev 时为 true（连 dev server），独立 electron . 启动时为 false（加载 out/ 静态文件）。
 const isDev = !!process.env.ELECTRON_RENDERER_URL
+
+// 任务栏 overlay 红点（32x32 红色圆点 PNG，#ef4444 与应用红灯一致）
+const RED_DOT_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA10lEQVR4nM2XwQ3EIAwE09O1sNSQGiiGrtIDPfBxBejuY6SIg4gQyPLYTxTYAdtgNgE2pqjmPQBGACfAIUAQIKqCfnP6z3AAK4AX4Nsor2MeA3x0Za3GuQ6dowtg1+3tNU+KOtctgH2Aca4iRG3bR6y8tBN/4SgBPIl5S05cAtiJ5kn2CuBOqfXK1wDMC+ZJpgTgXgRwJYCZyVdNxjNAeBEglABm1H5NcUkAegjoSUgvQ/pBRD+Kl7iM6NfxEg0JvSVboik9h4PWlufVQXmY5KI9zaaJDvADmQ5CiaN4bbQAAAAASUVORK5CYII='
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -108,6 +112,20 @@ function registerIpcHandlers() {
   })
   ipcMain.handle('window:close', () => mainWindow?.close())
   ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized())
+
+  // 任务栏图标红点徽章（仅 Windows 支持 overlay icon）
+  ipcMain.handle('app:set-overlay-badge', (_, hasWaiting: boolean) => {
+    if (process.platform !== 'win32' || !mainWindow) return
+    try {
+      if (hasWaiting) {
+        mainWindow.setOverlayIcon(nativeImage.createFromDataURL(RED_DOT_DATA_URL), '有终端等待输入')
+      } else {
+        mainWindow.setOverlayIcon(null, '')
+      }
+    } catch (error) {
+      console.warn('[Main] setOverlayIcon failed:', error)
+    }
+  })
 
   // 终端操作
   ipcMain.handle('terminal:create', (_, { id, cols, rows, cwd }) => {

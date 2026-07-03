@@ -161,6 +161,11 @@ declare global {
       shell: {
         openPath: (path: string) => Promise<string>;
       };
+
+      // App-level operations
+      app: {
+        setOverlayBadge: (hasWaiting: boolean) => Promise<void>;
+      };
     };
   }
 }

@@ -341,7 +341,14 @@ const electronAPI = {
   // Shell 工具
   shell: {
     openPath: (path: string) => ipcRenderer.invoke('shell:openPath', path),
-  }
+  },
+
+  // 应用级操作
+  app: {
+    // 任务栏图标红点徽章（任一终端等待输入时点亮）
+    setOverlayBadge: (hasWaiting: boolean) =>
+      ipcRenderer.invoke('app:set-overlay-badge', hasWaiting),
+  },
 }
 
 // 暴露到 window.electron
