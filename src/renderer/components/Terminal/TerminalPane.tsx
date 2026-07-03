@@ -7,7 +7,7 @@ import { WebglAddon } from 'xterm-addon-webgl'
 import 'xterm/css/xterm.css'
 import { TerminalInstance } from '../../App'
 import { getXTermTheme } from '../../hooks/useTheme'
-import { ScrollbackDeduplicator, lastCursorVisibility } from '../../utils/ScrollbackDeduplicator'
+import { ScrollbackDeduplicator, lastCursorVisibility, containsStatefulSequences } from '../../utils/ScrollbackDeduplicator'
 import { WorktreePopover } from '../Worktree/WorktreePopover'
 
 interface TerminalPaneProps {
@@ -193,9 +193,12 @@ export function TerminalPane({
     let pendingData = ''
     let rafId = 0
     let isDisposed = false
-    const MAX_WRITE_PER_FRAME = 512 * 1024  // 512KB per frame max
+    // 纯保险阀：rAF 间隔仅 ~16ms，2MB/帧 ≈ 128MB/s 持续输出才会触发
+    const MAX_WRITE_PER_FRAME = 2 * 1024 * 1024
     const deduplicator = new ScrollbackDeduplicator()
     const dedupEnabled = getDedupEnabled()
+    // 去重决策日志开关（A/B 排查用）：localStorage.setItem('multicc.deduplog','on')
+    const dedupLogEnabled = localStorage.getItem('multicc.deduplog') === 'on'
 
     // 用户刚输入后的"回显保护窗口"。去重器只该压制流式输出造成的重复 scrollback，
     // 绝不能丢弃用户输入/删除的回显——否则编辑多行输入时整块重绘被判重丢弃，
@@ -207,17 +210,45 @@ export function TerminalPane({
     const flushWrites = () => {
       rafId = 0
       if (pendingData && !isDisposed) {
-        // 极端压力下截断，保留最新数据
+        // 极端压力下截断，保留最新数据。切点必须落在安全边界：盲 slice 可能把
+        // ANSI 序列 / UTF-16 代理对从中间切断，产生畸形输出。
+        let wasTruncated = false
         if (pendingData.length > MAX_WRITE_PER_FRAME) {
-          pendingData = pendingData.slice(-MAX_WRITE_PER_FRAME)
+          wasTruncated = true
+          let cut = pendingData.length - MAX_WRITE_PER_FRAME
+          // 优先切在 \n 之后：转义序列实际不跨 \n，\n 也不会是代理对的一半
+          const nl = pendingData.indexOf('\n', cut)
+          if (nl !== -1 && nl - cut < 64 * 1024) {
+            cut = nl + 1
+          } else {
+            // 回退1：不切断代理对（低位代理 0xDC00-0xDFFF 说明切在了一对中间）
+            const c = pendingData.charCodeAt(cut)
+            if (c >= 0xdc00 && c <= 0xdfff) cut++
+            // 回退2：跳到下一个 ESC，从完整序列的开头继续
+            const esc = pendingData.indexOf('\x1b', cut)
+            if (esc !== -1 && esc - cut < 4096) cut = esc
+          }
+          pendingData = pendingData.slice(cut)
         }
         // 检测 scrollback 重复内容并跳过写入（dedupEnabled=false 时整体跳过去重，便于 A/B 排查）
         if (dedupEnabled) {
-          // 始终调用 isDuplicate 以持续记录行 hash（保证缓冲区状态正确），
-          // 但仅在"非用户刚输入"时才据其判定丢弃——保护交互回显不被误丢。
-          const dup = deduplicator.isDuplicate(pendingData)
           const recentlyTyped = (performance.now() - lastInputAt) < INPUT_ECHO_WINDOW_MS
-          if (dup && !recentlyTyped) {
+          // shouldDrop 内部对含状态控制序列（光标定位/擦除等）的帧一律放行——
+          // 丢弃这类帧会让 xterm 屏幕与 ConPTY 模型失步，是输入框错乱的根因。
+          const drop = deduplicator.shouldDrop(pendingData, { recentlyTyped, unsafe: wasTruncated })
+          if (dedupLogEnabled) {
+            const verdict = drop
+              ? 'dropped'
+              : wasTruncated
+                ? 'kept:truncated'
+                : recentlyTyped
+                  ? 'kept:typed'
+                  : containsStatefulSequences(pendingData)
+                    ? 'kept:stateful'
+                    : 'kept:new'
+            console.debug(`[dedup:${terminal.id}] ${verdict} len=${pendingData.length}`)
+          }
+          if (drop) {
             // 重复帧整块丢弃会连同块内的光标显隐码(?25l/?25h)一起丢掉，导致光标
             // 显隐状态与应用意图失步（典型表现：光标偶发性永久消失）。丢弃前补写块内
             // 最后一次光标显隐意图，确保光标可见性始终正确，同时仍抑制重复文本。
@@ -258,6 +289,9 @@ export function TerminalPane({
 
     // 监听终端大小变化
     xterm.onResize(({ cols, rows }) => {
+      // resize 后 ConPTY 全量重绘、行内容按新宽度重排，旧宽度的行 hash 已失效，
+      // 留着只会误判/占容量
+      deduplicator.reset()
       window.electron.terminal.resize(terminal.id, cols, rows)
     })
 
