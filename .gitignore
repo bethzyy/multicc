@@ -41,3 +41,6 @@ npm-debug.log*
 .claude/skills/toutiao-img/
 .claude/skills/toutiao-fmt.md
 .worktrees/
+
+# SDD scratch
+.superpowers/
