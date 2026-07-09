@@ -15,7 +15,6 @@ export interface TerminalInstance {
   id: string
   name: string
   cwd: string
-  isFocused: boolean
   state?: 'running' | 'waiting_input' | 'busy' | 'idle'
   minimized?: boolean
 }
@@ -37,7 +36,6 @@ function App() {
       id,
       name: `终端 ${terminals.length + 1}`,
       cwd: cwd || '',
-      isFocused: true,
       state: 'running'
     }
     console.log('[App] new terminal:', terminal)
@@ -75,23 +73,25 @@ function App() {
     }
   }, [focusedId, focusMode, terminals])
 
-  // 恢复最小化的终端（恢复后设为焦点，退出聚焦模式回到平铺，有大格时自然进大格）
+  // 恢复最小化的终端：移到数组末尾（orderForLayout 按数组顺序布局，
+  // 所以视觉上自然排在最后位置），并设为焦点。
   const restoreTerminal = useCallback((id: string) => {
-    setTerminals(prev => prev.map(t => t.id === id ? { ...t, minimized: false } : t))
+    setTerminals(prev => {
+      const target = prev.find(t => t.id === id)
+      if (!target) return prev
+      const filtered = prev.filter(t => t.id !== id)
+      return [...filtered, { ...target, minimized: false }]
+    })
     setFocusedId(id)
     setFocusMode(false)
   }, [])
 
   // 聚焦终端
+  // 唯一真相是 focusedId；isFocused prop 在 TileLayout 中由 (terminal.id === focusedId) 派生，
+  // 不再维护 TerminalInstance.isFocused 字段，避免双源真相的不一致。
   const focusTerminal = useCallback((id: string) => {
     setFocusedId(id)
-    const terminal = terminals.find(t => t.id === id)
-    if (terminal) {
-      setTerminals(prev =>
-        prev.map(t => ({ ...t, isFocused: t.id === id }))
-      )
-    }
-  }, [terminals])
+  }, [])
 
   // 切换聚焦模式
   const toggleFocusMode = useCallback(() => {
@@ -186,7 +186,6 @@ function App() {
       id,
       name: info.customTitle || `Session ${info.sessionId.slice(0, 8)}`,
       cwd: info.cwd,
-      isFocused: true,
     }
 
     setTerminals(prev => [...prev, terminal])
@@ -214,7 +213,6 @@ function App() {
       id,
       name: cmd.name,
       cwd: cmd.cwd || '',
-      isFocused: true,
     }
 
     setTerminals(prev => [...prev, terminal])

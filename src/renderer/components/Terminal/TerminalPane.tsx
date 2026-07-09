@@ -424,23 +424,26 @@ export function TerminalPane({
 
   // 聚焦时自动调整大小、聚焦终端、滚动到底部
   useEffect(() => {
-    if (isFocused && fitAddonRef.current && xtermRef.current) {
-      setTimeout(() => {
-        // 容器不可见（尺寸为 0）时跳过 fit，避免无效几何计算
-        const rect = containerRef.current?.getBoundingClientRect()
-        if (!rect || rect.width === 0 || rect.height === 0) return
-        try {
-          fitAddonRef.current?.fit()
-          xtermRef.current?.focus()
-          // fit 后滚动到底部
-          requestAnimationFrame(() => {
-            xtermRef.current?.scrollToBottom()
-          })
-        } catch (e) {
-          console.warn('Focus fit failed:', e)
-        }
-      }, 0)
-    }
+    if (!isFocused) return
+    // setTimeout(0) 让 React 提交 DOM 后再 fit/focus。cleanup 必须取消 timer，
+    // 否则快速切换焦点时旧终端的 timer 仍会触发 xterm.focus()，把 DOM 焦点抢回旧终端
+    // （"焦点粘在第一个终端"现象的根因）。
+    const timer = setTimeout(() => {
+      // 容器不可见（尺寸为 0）时跳过 fit，避免无效几何计算
+      const rect = containerRef.current?.getBoundingClientRect()
+      if (!rect || rect.width === 0 || rect.height === 0) return
+      try {
+        fitAddonRef.current?.fit()
+        xtermRef.current?.focus()
+        // fit 后滚动到底部
+        requestAnimationFrame(() => {
+          xtermRef.current?.scrollToBottom()
+        })
+      } catch (e) {
+        console.warn('Focus fit failed:', e)
+      }
+    }, 0)
+    return () => clearTimeout(timer)
   }, [isFocused])
 
   // 主题变化时更新 XTerm 主题

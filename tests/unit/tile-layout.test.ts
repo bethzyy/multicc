@@ -64,28 +64,16 @@ describe('computeTileLayout', () => {
   }
 })
 
-describe('orderForLayout — 焦点交换进大格', () => {
+describe('orderForLayout — 纯按数组顺序', () => {
   const ts = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
 
-  it('焦点与首位互换，第三者槽位不变', () => {
-    expect(orderForLayout(ts, 'c', true).map((t) => t.id)).toEqual(['c', 'b', 'a'])
-  })
-
-  it('焦点已在首位时不变', () => {
-    expect(orderForLayout(ts, 'a', true).map((t) => t.id)).toEqual(['a', 'b', 'c'])
-  })
-
-  it('无大格（均分网格）时不交换', () => {
-    expect(orderForLayout(ts, 'c', false).map((t) => t.id)).toEqual(['a', 'b', 'c'])
-  })
-
-  it('焦点不在可见列表（已最小化/关闭）时不交换', () => {
-    expect(orderForLayout(ts, 'x', true).map((t) => t.id)).toEqual(['a', 'b', 'c'])
+  it('原样返回数组顺序', () => {
+    expect(orderForLayout(ts).map((t) => t.id)).toEqual(['a', 'b', 'c'])
   })
 
   it('不修改入参数组', () => {
     const input = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
-    orderForLayout(input, 'c', true)
+    orderForLayout(input)
     expect(input.map((t) => t.id)).toEqual(['a', 'b', 'c'])
   })
 })

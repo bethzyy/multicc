@@ -1,12 +1,12 @@
 /**
  * 平铺布局计算（纯函数，供 TileLayout 组件与单测共用）。
  *
- * 规则（见 2026-07-03 设计文档）：
+ * 规则：
  * - cols = ceil(sqrt(n))，rows = ceil(n/cols)，holes = cols*rows - n
  * - holes = 0：均分网格，无大格
  * - holes > 0：大格 = 第 1 列纵向跨 (holes+1) 行，其余格子行优先填充，永远无空洞
- * - 焦点终端通过 orderForLayout 与首位"交换"进大格：每次焦点变化只有
- *   两个槽位互换，其余终端不动，避免全局跳动
+ * - 布局完全按 terminals 数组顺序映射到槽位（数组首位 → 大格）。
+ *   焦点切换不重排，最小化恢复时由调用方把终端移到数组末尾实现"排最后"。
  */
 export interface TileSlot {
   row: number
@@ -48,18 +48,10 @@ export function computeTileLayout(n: number): TileLayoutResult {
   return { cols, rows, hasBigSlot: true, slots }
 }
 
-export function orderForLayout<T extends { id: string }>(
-  visible: T[],
-  focusedId: string | null,
-  hasBigSlot: boolean
-): T[] {
-  const ordered = [...visible]
-  if (!hasBigSlot || !focusedId) return ordered
-  const idx = ordered.findIndex((t) => t.id === focusedId)
-  if (idx > 0) {
-    const tmp = ordered[0]
-    ordered[0] = ordered[idx]
-    ordered[idx] = tmp
-  }
-  return ordered
+/**
+ * 按数组顺序返回。保留参数以减少调用方改动，但当前不做任何重排——
+ * 焦点切换不再影响位置，"恢复排最后"由调用方在 terminals 数组上移位实现。
+ */
+export function orderForLayout<T extends { id: string }>(visible: T[]): T[] {
+  return [...visible]
 }

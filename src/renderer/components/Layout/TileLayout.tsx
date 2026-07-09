@@ -34,7 +34,7 @@ export function TileLayout({
   // 网格只对可见终端计算；最小化终端保持挂载但 display:none（内容零丢失）
   const visibleTerminals = terminals.filter(t => !t.minimized)
   const layout = computeTileLayout(visibleTerminals.length)
-  const ordered = orderForLayout(visibleTerminals, focusedId, layout.hasBigSlot)
+  const ordered = orderForLayout(visibleTerminals)
   const slotById = new Map<string, TileSlot>()
   ordered.forEach((t, i) => slotById.set(t.id, layout.slots[i]))
 
