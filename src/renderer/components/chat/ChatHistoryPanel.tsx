@@ -230,6 +230,9 @@ function SessionList({
   );
 }
 
+/** 详情视图单次渲染的消息条数上限（增量加载，避免长会话全量渲染卡顿） */
+const DETAIL_RENDER_CHUNK = 200;
+
 /** Session detail component */
 function SessionDetail({
   messages,
@@ -244,6 +247,12 @@ function SessionDetail({
   session: SessionSummary | null;
   onResumeSession?: (info: { sessionId: string; cwd: string; source: ChatSource; customTitle?: string }) => void;
 }) {
+  // 默认只渲染最后 DETAIL_RENDER_CHUNK 条，点"加载更早"递增；切换会话时重置
+  const [visibleCount, setVisibleCount] = useState(DETAIL_RENDER_CHUNK);
+  useEffect(() => {
+    setVisibleCount(DETAIL_RENDER_CHUNK);
+  }, [sessionId]);
+
   if (!sessionId) {
     return (
       <div className="session-detail__empty">
@@ -314,12 +323,21 @@ function SessionDetail({
       )}
 
       <div className="session-detail__messages">
+        {messages.length > visibleCount && (
+          <button
+            className="session-detail__button"
+            style={{ display: 'block', margin: '8px auto' }}
+            onClick={() => setVisibleCount((c) => c + DETAIL_RENDER_CHUNK)}
+          >
+            Load earlier messages ({messages.length - visibleCount} more)
+          </button>
+        )}
         {messages.length === 0 ? (
           <div style={{ color: '#6d6d6d', textAlign: 'center', padding: '16px' }}>
             No messages in this session
           </div>
         ) : (
-          messages.map((msg) => (
+          messages.slice(Math.max(0, messages.length - visibleCount)).map((msg) => (
             <div key={msg.uuid} className={`message message--${msg.type}`}>
               <div className="message__role">{msg.type}</div>
               <div className="message__content">

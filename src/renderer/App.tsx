@@ -7,6 +7,7 @@ import { ConfigBrowser } from './components/config'
 import { ToolsBrowser } from './components/tools'
 import { UpdateNotification } from './components/update/UpdateNotification'
 import { useTheme, type Theme } from './hooks/useTheme'
+import { playNotificationSound } from './utils/notificationSound'
 import { v4 as uuidv4 } from 'uuid'
 import type { ChatSource } from '@shared/types/chat.types'
 import type { CustomCommand } from '@shared/types/tools.types'
@@ -28,6 +29,19 @@ function App() {
   const [showToolsBrowser, setShowToolsBrowser] = useState(false)
   const { theme, toggleTheme } = useTheme()
 
+  // 提示音：记录每个终端上一次的状态，只在"进入 waiting_input"的跃迁时响铃；
+  // 3 秒全局冷却防多终端连响。开关读自 ~/.multicc/settings.json 的 soundNotification（默认开）。
+  const lastStatesRef = useRef<Map<string, string>>(new Map())
+  const lastBeepAtRef = useRef(0)
+  const soundEnabledRef = useRef(true)
+  useEffect(() => {
+    window.electron.resources.getSettings()
+      .then((result: { settings: Record<string, unknown> }) => {
+        soundEnabledRef.current = result.settings.soundNotification !== false
+      })
+      .catch(() => {})
+  }, [])
+
   // 创建新终端
   const createTerminal = useCallback((cwd?: string) => {
     console.log('[App] createTerminal called, cwd:', cwd)
@@ -46,6 +60,7 @@ function App() {
 
   // 关闭终端
   const closeTerminal = useCallback((id: string) => {
+    lastStatesRef.current.delete(id)
     setTerminals(prev => {
       const filtered = prev.filter(t => t.id !== id)
       // 如果关闭的是当前聚焦的终端，切换到第一个
@@ -137,6 +152,15 @@ function App() {
 
   // 终端状态变化
   const handleTerminalStateChange = useCallback((id: string, state: string) => {
+    const prevState = lastStatesRef.current.get(id)
+    lastStatesRef.current.set(id, state)
+    if (state === 'waiting_input' && prevState !== 'waiting_input' && soundEnabledRef.current) {
+      const now = Date.now()
+      if (now - lastBeepAtRef.current >= 3000) {
+        lastBeepAtRef.current = now
+        playNotificationSound()
+      }
+    }
     setTerminals(prev =>
       prev.map(t => t.id === id ? { ...t, state: state as TerminalInstance['state'] } : t)
     )

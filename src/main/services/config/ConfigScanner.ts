@@ -357,12 +357,30 @@ export function watchConfigChanges(
 ): () => void {
   const watchers: fs.FSWatcher[] = [];
 
+  // 300ms 防抖合并：Windows 下 fs.watch 单次变更常触发多个事件，
+  // 每次事件都会导致 renderer 全量重扫，这里合并成一次通知。
+  const pending = new Map<string, { type: ResourceType; path: string }>();
+  let debounceTimer: NodeJS.Timeout | null = null;
+  const notify = (type: ResourceType, changedPath: string) => {
+    pending.set(`${type}:${changedPath}`, { type, path: changedPath });
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      const events = [...pending.values()];
+      pending.clear();
+      for (const e of events) {
+        callback(e.type, e.path);
+      }
+    }, 300);
+  };
+
   // Watch skills directory
+  // recursive: 捕捉 skill 子目录内文件（如 SKILL.md）的编辑，之前只能看到顶层增删
   const skillsDir = getSkillsDir();
   if (fs.existsSync(skillsDir)) {
-    const watcher = fs.watch(skillsDir, { recursive: false }, (event, filename) => {
+    const watcher = fs.watch(skillsDir, { recursive: true }, (_event, filename) => {
       if (filename) {
-        callback('skill', path.join(skillsDir, filename));
+        notify('skill', path.join(skillsDir, filename));
       }
     });
     watchers.push(watcher);
@@ -371,14 +389,15 @@ export function watchConfigChanges(
   // Watch MCP config
   const mcpPath = getMcpConfigPath();
   if (fs.existsSync(mcpPath)) {
-    const watcher = fs.watch(mcpPath, (event) => {
-      callback('mcp-config', mcpPath);
+    const watcher = fs.watch(mcpPath, () => {
+      notify('mcp-config', mcpPath);
     });
     watchers.push(watcher);
   }
 
   // Return cleanup function
   return () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
     for (const watcher of watchers) {
       watcher.close();
     }

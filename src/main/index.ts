@@ -51,7 +51,8 @@ function createWindow() {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      sandbox: true
     },
     icon: join(__dirname, '../../resources/icon.ico')
   })
@@ -80,6 +81,26 @@ function createWindow() {
     })
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  // 阻止顶层页面导航到应用自身以外的源（SPA 无合法跨源导航）
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    let allowed = false
+    try {
+      const target = new URL(url)
+      if (isDev) {
+        const devOrigin = new URL(process.env.ELECTRON_RENDERER_URL || 'http://localhost:5173').origin
+        allowed = target.origin === devOrigin
+      } else {
+        allowed = target.protocol === 'file:'
+      }
+    } catch {
+      allowed = false
+    }
+    if (!allowed) {
+      console.warn('[Security] Blocked navigation to:', url)
+      event.preventDefault()
+    }
+  })
 
   // 外部链接用默认浏览器打开（校验 URL 协议）
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -209,7 +230,12 @@ function registerIpcHandlers() {
   registerWorktreeHandlers()
 
   // Shell 工具 (打开文件管理器等)
+  // 只接受已存在的目录，防止被用来启动任意可执行文件
   ipcMain.handle('shell:openPath', async (_event, path: string) => {
+    if (!path || typeof path !== 'string' || !isValidWorkingDir(path)) {
+      console.warn('[Security] shell:openPath rejected:', path)
+      return 'Path rejected: not an existing directory'
+    }
     return shell.openPath(path)
   })
 
@@ -241,6 +267,9 @@ app.on('window-all-closed', () => {
 
 // 清理资源（带超时保护）
 app.on('before-quit', (event) => {
+  // 防抖中的 store 写入落盘
+  storeService?.flushSync()
+
   if (!ptyService) return
 
   // 先阻止默认行为，异步清理

@@ -11,10 +11,11 @@ import * as crypto from 'crypto';
 import { ipcMain, BrowserWindow } from 'electron';
 import { homedir } from 'os';
 import { IPC_CHANNELS } from '@shared/constants/channels';
-import type {
-  ConfigResource,
-  ResourceContent,
-  ResourceType,
+import {
+  DEFAULT_SETTINGS,
+  type ConfigResource,
+  type ResourceContent,
+  type ResourceType,
 } from '@shared/types/config.types';
 import {
   getResources,
@@ -28,16 +29,6 @@ import type { StoreService } from '../services/store';
 function getSettingsPath(): string {
   return path.join(homedir(), '.multicc', 'settings.json');
 }
-
-/** Default settings */
-const DEFAULT_SETTINGS = {
-  theme: 'dark',
-  fontSize: 14,
-  fontFamily: 'Consolas, "Courier New", monospace',
-  confirmClose: true,
-  enableArchive: true,
-  maxTerminals: 20,
-};
 
 /** Load settings from file */
 function loadSettings(): Record<string, unknown> {
@@ -79,6 +70,31 @@ function saveSettings(settings: Record<string, unknown>): boolean {
 /** Compute SHA-256 hash for translation cache key */
 function contentHash(text: string): string {
   return crypto.createHash('sha256').update(text).digest('hex');
+}
+
+/** 翻译缓存上限：超过 500 条时按 timestamp 淘汰最旧的，删到 400 条 */
+const MAX_TRANSLATE_CACHE_ENTRIES = 500;
+const TRANSLATE_CACHE_TRIM_TO = 400;
+
+function evictTranslationCache(storeService: StoreService): void {
+  try {
+    const keys = storeService.keys().filter((k) => k.startsWith('translate:'));
+    if (keys.length < MAX_TRANSLATE_CACHE_ENTRIES) return;
+
+    const entries = keys.map((key) => {
+      const value = storeService.get(key) as { timestamp?: number } | undefined;
+      return { key, timestamp: value?.timestamp ?? 0 };
+    });
+    entries.sort((a, b) => a.timestamp - b.timestamp);
+
+    const removeCount = entries.length - TRANSLATE_CACHE_TRIM_TO;
+    for (const entry of entries.slice(0, removeCount)) {
+      storeService.delete(entry.key);
+    }
+    console.log(`[Translate] Cache evicted ${removeCount} oldest entries`);
+  } catch (error) {
+    console.warn('[Translate] Cache eviction failed:', error);
+  }
 }
 
 /**
@@ -296,6 +312,7 @@ export function registerConfigHandlers(_window: BrowserWindow, storeService: Sto
 
         // Save to cache
         try {
+          evictTranslationCache(storeService);
           storeService.set(cacheKey, { original: text, translated, timestamp: Date.now() });
           console.log('[Translate] Cached:', hash.substring(0, 12), 'length:', translated.length);
         } catch {

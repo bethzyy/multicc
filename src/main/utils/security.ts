@@ -4,7 +4,7 @@
  * Provides input validation and path sanitization for IPC handlers.
  */
 
-import { normalize, resolve, sep, basename, dirname, join } from 'path'
+import { normalize, resolve, sep, basename, join } from 'path'
 import { existsSync, realpathSync, statSync } from 'fs'
 import { homedir } from 'os'
 
@@ -89,26 +89,41 @@ export function safePath(baseDir: string, userPath: string): string | null {
  * Validate that a path is within allowed directories
  */
 export function isPathAllowed(filePath: string): boolean {
-  const resolved = resolve(filePath)
+  let resolved = resolve(filePath)
 
-  return ALLOWED_BASE_DIRS.some(baseDir => {
-    const normalizedBase = resolve(baseDir)
-    return resolved.startsWith(normalizedBase + sep) || resolved === normalizedBase
-  })
-    // Also allow paths under any .claude/skills/ directory (project-level skills)
+  // 解析 symlink：白名单目录内的链接若指向外部，按真实目标校验
+  try {
+    resolved = realpathSync(resolved)
+  } catch {
+    // 路径不存在时无法 realpath，用 resolve 结果继续校验
+  }
+
+  return isUnderAllowedBase(resolved)
+    // Also allow paths under any project-level .claude directory
     || isProjectLevelClaudePath(resolved)
+}
+
+function isUnderAllowedBase(resolved: string): boolean {
+  // Windows 文件系统不区分大小写，比较前统一小写
+  const caseFold = (p: string) => (process.platform === 'win32' ? p.toLowerCase() : p)
+  const target = caseFold(resolved)
+  return ALLOWED_BASE_DIRS.some(baseDir => {
+    const normalizedBase = caseFold(resolve(baseDir))
+    return target.startsWith(normalizedBase + sep) || target === normalizedBase
+  })
 }
 
 /**
  * Check if a path is under a project-level .claude directory
  * (e.g., C:\Projects\myapp\.claude\skills\...)
+ *
+ * 锚定到完整路径段：`.claude` 必须是一个独立目录名，其下只放行
+ * skills 子树、mcp.json 与 CLAUDE.md，避免 `.claude/skillsXYZ`
+ * 或 `foo.claude/...` 这类子串误放行。
  */
 function isProjectLevelClaudePath(resolved: string): boolean {
-  // Match paths containing .claude/skills or .claude/mcp.json or .claude/CLAUDE.md
   const normalized = resolved.replace(/\\/g, '/')
-  return /\.claude\/(skills|mcp\.json|CLAUDE\.md)/.test(normalized)
-    || normalized.endsWith('.claude/skills')
-    || /\.claude\/skills\//.test(normalized)
+  return /(^|\/)\.claude\/(skills(\/|$)|mcp\.json$|CLAUDE\.md$)/i.test(normalized)
 }
 
 /**

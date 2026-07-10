@@ -97,6 +97,8 @@ export interface AppSettings {
   maxTerminals: number;
   /** Default shell */
   shell: string;
+  /** Play a sound when a terminal starts waiting for input */
+  soundNotification: boolean;
 }
 
 /** Default settings */
@@ -108,6 +110,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enableArchive: true,
   maxTerminals: 20,
   shell: 'cmd.exe',
+  soundNotification: true,
 };
 
 // ── Marketplace types (ClawHub) ──

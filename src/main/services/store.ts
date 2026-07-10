@@ -1,5 +1,6 @@
 import { app } from 'electron'
-import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, renameSync } from 'fs'
+import { writeFile, rename } from 'fs/promises'
 import { join } from 'path'
 
 export interface Session {
@@ -21,6 +22,8 @@ export class StoreService {
   private sessionsPath: string
   private storePath: string
   private storeCache: Map<string, unknown> | null = null
+  private saveTimer: NodeJS.Timeout | null = null
+  private savePending = false
 
   constructor() {
     const dataDir = app.getPath('userData')
@@ -57,7 +60,29 @@ export class StoreService {
       this.storeCache = this.loadStore()
     }
     this.storeCache.set(key, value)
-    this.saveStore(this.storeCache)
+    this.scheduleSave()
+  }
+
+  /**
+   * Generic key-value delete
+   */
+  delete(key: string): void {
+    if (!this.storeCache) {
+      this.storeCache = this.loadStore()
+    }
+    if (this.storeCache.delete(key)) {
+      this.scheduleSave()
+    }
+  }
+
+  /**
+   * List all keys
+   */
+  keys(): string[] {
+    if (!this.storeCache) {
+      this.storeCache = this.loadStore()
+    }
+    return [...this.storeCache.keys()]
   }
 
   private loadStore(): Map<string, unknown> {
@@ -73,12 +98,50 @@ export class StoreService {
     return new Map()
   }
 
-  private saveStore(store: Map<string, unknown>): void {
+  /**
+   * 防抖异步写盘：200ms 内的多次 set/delete 合并为一次写，
+   * 避免每次操作都同步重写整个 store.json 阻塞主线程。
+   */
+  private scheduleSave(): void {
+    this.savePending = true
+    if (this.saveTimer) return
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null
+      void this.flushStore()
+    }, 200)
+  }
+
+  private async flushStore(): Promise<void> {
+    if (!this.savePending || !this.storeCache) return
+    this.savePending = false
     try {
-      const obj = Object.fromEntries(store)
-      writeFileSync(this.storePath, JSON.stringify(obj, null, 2))
+      const obj = Object.fromEntries(this.storeCache)
+      // 原子写：先写临时文件再 rename，避免中途崩溃留下半截 JSON
+      const tempPath = `${this.storePath}.tmp`
+      await writeFile(tempPath, JSON.stringify(obj, null, 2), 'utf-8')
+      await rename(tempPath, this.storePath)
     } catch (error) {
       console.error('[Store] Failed to save store:', error)
+    }
+  }
+
+  /**
+   * 退出前同步兜底写盘（before-quit 时调用）
+   */
+  flushSync(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
+    if (!this.savePending || !this.storeCache) return
+    this.savePending = false
+    try {
+      const obj = Object.fromEntries(this.storeCache)
+      const tempPath = `${this.storePath}.tmp`
+      writeFileSync(tempPath, JSON.stringify(obj, null, 2))
+      renameSync(tempPath, this.storePath)
+    } catch (error) {
+      console.error('[Store] Failed to flush store:', error)
     }
   }
 
