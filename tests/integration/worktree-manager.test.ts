@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { execSync } from 'node:child_process'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { WorktreeManager, WorktreeError } from '../../src/main/services/worktree/WorktreeManager'
@@ -22,7 +22,9 @@ interface Fixture {
 }
 
 async function makeRepo(): Promise<Fixture> {
-  const tmp = await mkdtemp(join(tmpdir(), 'multicc-wt-test-'))
+  // realpathSync.native 展开 Windows 8.3 短路径（GitHub runner 的 TEMP 是 RUNNER~1 形式），
+  // 否则 fixture 路径（短）与 git 输出路径（长）字符串不等，isSamePath 比较必然失败
+  const tmp = realpathSync.native(await mkdtemp(join(tmpdir(), 'multicc-wt-test-')))
   const repo = join(tmp, 'myproj')
   await mkdir(repo)
   const sh = (cmd: string, cwd: string = repo): string =>
