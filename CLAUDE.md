@@ -20,6 +20,37 @@ npm install --ignore-scripts  # 安装依赖（必须使用，避免 node-pty �
 
 **运行应用：** 双击 `start.bat` 或执行 `npm run dev`
 
+## Testing
+
+```bash
+npm test                 # 全量测试（vitest run）
+npm run test:unit        # 只跑单元测试（<5s，Stop hook 自动跑的就是这个）
+npm run test:integration # 只跑集成测试（真实 git，~15s）
+npm run test:watch       # 监听模式
+npx vitest run tests/integration/worktree-manager.test.ts  # 只跑单个套件
+```
+
+**分层执行策略**（测试规模增长后依然不拖慢开发）：
+- 改代码过程中：只跑**相关的测试文件**（vitest 指定单文件，秒级）
+- 每次 AI 回合结束：`.claude/settings.json` 的 Stop hook 自动跑 `test:unit`（快层，红了会阻断并反馈给 AI）
+- 每天 00:00：Windows 计划任务 `multicc-nightly-test` 自动跑全量（`scripts/nightly-test.ps1`，红了弹系统通知，日志在 `%LOCALAPPDATA%\multicc\nightly-test.log`；错过时间点会在下次开机补跑）
+- 提交/推送前：手动 `npm test` 全量；push 后 GitHub Actions 再跑一遍
+
+**目录结构**：
+- `tests/unit/` — 纯函数单元测试（tileLayout、parsePromptCwd、path 工具等，不依赖 electron/DOM）
+- `tests/integration/` — 服务层集成测试（WorktreeManager 在临时目录跑真实 git，不 mock）
+- `tests/fixtures/` — 测试数据
+
+**CI 硬卡点**：`.github/workflows/test.yml` 在每次 push/PR 自动跑 no-skip 检查 + 全部测试 + 构建。配合 GitHub branch protection（Require status checks）实现"不绿不能合并"。
+
+**测试规范**（任何功能改动都适用）：
+1. **测试全绿才算完成**——改完代码必须跑 `npm test`，红着不能交付
+2. **行为变更必须在同一次提交里改/删对应测试**，并在 commit message 注明需求变更理由；禁止为让测试通过而迁就断言
+3. **测行为，不测实现**——断言走公开 API（类的 public 方法、IPC 返回值），禁止断言内部调用细节；重构内部实现不应导致测试变红
+4. **用例名写清"条件 + 行为 + 理由"**（如"删除含未提交改动的 worktree 时非 force 必须抛 DIRTY，防一键丢数据"），让失败时能立刻判断是代码坏了还是需求变了
+5. **禁止 `.only`/`.skip` 进仓库**（CI 会拦），临时 skip 必须注明原因和期限
+6. **新测试先验证会红**——故意破坏被测逻辑跑一次，确认失败信息指向正确原因，再恢复提交
+
 ## Architecture
 
 ### Tech Stack
@@ -112,6 +143,16 @@ Renderer Process                              Main Process
 **CliDetector** (`src/main/services/tools/CliDetector.ts`):
 - 检测已安装 CLI 工具（Claude Code, Codex CLI, Gemini CLI）
 
+**WorktreeManager** (`src/main/services/worktree/WorktreeManager.ts`):
+- Git worktree 管理：创建（`<repo>/.worktrees/wt-N` + 同名分支）/ 列表（含脏文件数、ahead/behind）/ 重命名 / 安全删除 / squash 合并回主分支
+- 主仓库定位：`worktree list --porcelain` 第一条（git 保证主 worktree 排首位）
+- 忽略规则写 `.git/info/exclude`（纯本地），不修改用户的 `.gitignore`
+- 删除默认非 force：有未提交改动抛 `DIRTY` 结构化错误码，UI 确认后才 force + 删分支；目录被占用抛 `LOCKED`
+- `mergeToMain`：双方必须干净，冲突时 `reset --merge` 自动回滚并抛 `CONFLICT`
+- 新建后 setup 钩子：拷贝 `config.json` 里 `worktreeSetup.copyFiles`（默认 `.env`），`setupCommand` 在新终端中自动键入执行
+- 路径比较统一走 `src/shared/utils/path.ts`（git 输出正斜杠 vs PTY 反斜杠，Windows 大小写不敏感）
+- **已知局限**：`isMerged` 基于 `branch --merged`，squash-merge（含本工具的 merge 按钮）后检测不到已合并状态
+
 **UpdateManager** (`src/main/services/update/UpdateManager.ts`):
 - electron-updater 封装，仅生产环境启用
 
@@ -175,6 +216,11 @@ window.electron.chat.getProjects() / getSessions(projectPath) / getSessionConten
 // 工具管理
 window.electron.tools.detectCli() / getCustomCommands() / saveCustomCommand(...)
 
+// Git Worktree
+window.electron.worktree.detectRepo(cwd) / list(repoPath) / create(repoPath)
+window.electron.worktree.getStatus(path) / remove(path, force?) / rename(path, branch) / merge(path)
+// 破坏性操作只接受 <repo>/.worktrees/ 下的路径；错误带结构化 code（DIRTY/LOCKED/CONFLICT/...）
+
 // 更新
 window.electron.update.checkForUpdates() / downloadUpdate() / installUpdate()
 
@@ -213,3 +259,4 @@ window.electron.app.setOverlayBadge(hasWaiting)  // 任务栏图标红点徽章
 | 重负载输出闪退 | 进程检测并发冲突 | OutputRateMonitor + IPC 数据合并缓冲 |
 | Installed 技能列表为空 | 未传 projectPath + 路径白名单过严 | 传 cwd + 扫描父目录 + 扩展白名单 |
 | 标题目录被 claude 输出污染/换目录重启不刷新 | 宽松正则全缓冲扫描猜 cwd | 行首锚定提示符解析 `parsePromptCwd`，无匹配即冻结 |
+| Worktree 一键强删丢数据 / current 徽章 Windows 失效 | 无脏检查直接 force + git 正斜杠 vs PTY 反斜杠路径比较 | 两段式删除（getStatus→确认）+ `normalizePath` 统一比较 |

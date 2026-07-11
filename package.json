@@ -9,6 +9,8 @@
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
     "test:watch": "vitest",
     "build:win": "npm run build && electron-builder --win --x64",
     "build:win:arm": "npm run build && electron-builder --win --arm64",

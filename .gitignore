@@ -38,8 +38,8 @@ out/
 npm-debug.log*
 .env.local
 *.asar
-.claude/skills/toutiao-img/
-.claude/skills/toutiao-fmt.md
+# 个人技能目录整体忽略：内含 API Key 明文（如 free-search 的 CHANGELOG），绝不能入库
+.claude/skills/
 .worktrees/
 
 # SDD scratch

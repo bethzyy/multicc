@@ -1,0 +1,40 @@
+# 回归测试硬卡点：push / PR 自动跑全部测试 + 构建。
+# 配合 GitHub 仓库 Settings → Branches → main 的 branch protection
+# （勾选 "Require status checks to pass" 并选中本 workflow），
+# 测试不绿则合并按钮不可用。
+name: test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: windows-latest # multicc 是 Windows 应用，路径/git 行为需在 Windows 上验证
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # 项目约定：--ignore-scripts 避免 node-pty 原生编译（用 @lydell 预编译版）
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # 禁止 .only / .skip 溜进仓库：
+      # .only 会静默禁用其它所有测试，.skip 长期积累会变成误导性的"僵尸用例"
+      - name: Forbid .only/.skip in tests
+        shell: pwsh
+        run: |
+          $hits = Get-ChildItem tests -Recurse -Filter *.test.ts | Select-String -Pattern '\.(only|skip)\s*\('
+          if ($hits) {
+            Write-Host "Found forbidden .only/.skip in tests:" -ForegroundColor Red
+            $hits | ForEach-Object { Write-Host $_ }
+            exit 1
+          }
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
