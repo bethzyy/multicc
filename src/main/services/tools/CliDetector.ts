@@ -34,7 +34,7 @@ const TOOL_CONFIGS: Record<ToolType, {
     command: 'codex',
     versionFlag: '--version',
     description: 'OpenAI\'s Codex CLI for code generation',
-    installHint: 'pip install codex-cli',
+    installHint: 'npm install -g @openai/codex',
     homepage: 'https://github.com/openai/codex'
   },
   gemini: {
@@ -42,7 +42,7 @@ const TOOL_CONFIGS: Record<ToolType, {
     command: 'gemini',
     versionFlag: '--version',
     description: 'Google\'s Gemini CLI for AI assistance',
-    installHint: 'pip install gemini-cli',
+    installHint: 'npm install -g @google/gemini-cli',
     homepage: 'https://ai.google.dev/'
   },
   custom: {

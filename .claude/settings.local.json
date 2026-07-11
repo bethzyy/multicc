@@ -45,7 +45,18 @@
       "PowerShell(cmd /c \"D:\\\\Gitrepo\\\\multicc\\\\start.bat\")",
       "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"D:\\\\Gitrepo\\\\multicc\\\\start.bat\"\\); \"Length: $\\($bytes.Length\\)\"; \"First 4 bytes: $\\($bytes[0..3] -join ','\\)\"; $raw = Get-Content -Raw \"D:\\\\Gitrepo\\\\multicc\\\\start.bat\"; $crlf = $raw.Contains\\(\"`r`n\"\\); \"Has CRLF: $crlf\")",
       "PowerShell(Get-Process *)",
-      "PowerShell(\"E:\\\\ exists: $\\(Test-Path 'E:\\\\'\\)\"; $cfg = Join-Path $env:APPDATA 'multicc\\\\config.json'; \"config path: $cfg  exists: $\\(Test-Path $cfg\\)\"; if \\(Test-Path $cfg\\) { Get-Content -Raw $cfg })"
+      "PowerShell(\"E:\\\\ exists: $\\(Test-Path 'E:\\\\'\\)\"; $cfg = Join-Path $env:APPDATA 'multicc\\\\config.json'; \"config path: $cfg  exists: $\\(Test-Path $cfg\\)\"; if \\(Test-Path $cfg\\) { Get-Content -Raw $cfg })",
+      "Bash(npx electron-rebuild *)",
+      "Bash(node node_modules/electron/install.js)",
+      "Bash(node -e \"console.log\\(require\\('electron'\\)\\)\")",
+      "Bash(ELECTRON_MIRROR=\"https://npmmirror.com/mirrors/electron/\" node node_modules/electron/install.js)",
+      "Bash(npx electron *)",
+      "Bash(tasklist)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill *)",
+      "Bash(git fetch *)",
+      "Bash(git show *)",
+      "Bash(git add *)"
     ]
   },
   "hooks": {
@@ -55,18 +66,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"C:\\Users\\yingy\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe\" \"C:\\D\\CAIE_tool\\MyAIProduct\\.claude\\scripts\\notify.py\" \"【会话结束】可以继续了\""
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "os == 'windows'",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"C:\\Users\\yingy\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe\" \"C:\\D\\CAIE_tool\\MyAIProduct\\.claude\\scripts\\notify.py\" \"【任务完成】已完成操作\""
+            "command": "\"C:\\Users\\yingy\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe\" \"C:\\D\\CAIE_tool\\MyAIProduct\\.claude\\scripts\\notify.py\" \"【会话结束】\""
           }
         ]
       }
@@ -77,16 +77,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"C:\\Users\\yingy\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe\" \"C:\\D\\CAIE_tool\\MyAIProduct\\.claude\\scripts\\notify.py\" \"【等待输入】请告诉我下一步做什么\""
-          }
-        ]
-      },
-      {
-        "matcher": "message contains 'Do you want to proceed?' || message contains '请选择' || message contains '是否继续'",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"C:\\Users\\yingy\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe\" \"C:\\D\\CAIE_tool\\MyAIProduct\\.claude\\scripts\\notify.py\" \"【权限确认】需要您批准才能继续\""
+            "command": "\"C:\\Users\\yingy\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe\" \"C:\\D\\CAIE_tool\\MyAIProduct\\.claude\\scripts\\notify.py\" \"【等待输入】\""
           }
         ]
       }
