@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { StoreService } from './store'
+import type { WorktreeSetup } from '@shared/types/worktree.types'
 
 export interface AppConfig {
   claudePath: string
@@ -10,6 +11,7 @@ export interface AppConfig {
   theme: 'dark' | 'light'
   fontSize: number
   fontFamily: string
+  worktreeSetup: WorktreeSetup
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -18,7 +20,9 @@ const DEFAULT_CONFIG: AppConfig = {
   defaultWorkingDir: 'E:\\',
   theme: 'dark',
   fontSize: 14,
-  fontFamily: 'Consolas, "Courier New", monospace'
+  fontFamily: 'Consolas, "Courier New", monospace',
+  // 新建 worktree 后从主仓库根目录拷贝的文件 / 在新终端自动执行的命令（手改 config.json 自定义）
+  worktreeSetup: { copyFiles: ['.env'] }
 }
 
 export class ConfigService {
@@ -115,6 +119,14 @@ export class ConfigService {
     const config = this.loadConfig()
     config.fontSize = size
     this.saveConfig(config)
+  }
+
+  getWorktreeSetup(): WorktreeSetup {
+    const setup = this.loadConfig().worktreeSetup
+    return {
+      copyFiles: Array.isArray(setup?.copyFiles) ? setup.copyFiles : [],
+      setupCommand: typeof setup?.setupCommand === 'string' ? setup.setupCommand : undefined
+    }
   }
 
   getFontFamily(): string {

@@ -11,7 +11,8 @@ interface TileLayoutProps {
   onMinimizeTerminal: (id: string) => void
   onTerminalStateChange: (id: string, state: string) => void
   onTerminalCwdChange: (id: string, cwd: string) => void
-  onOpenWorktree: (path: string) => void
+  onOpenWorktree: (path: string, setupCommand?: string) => void
+  openTerminalCwds: string[]
   focusMode: boolean
   onToggleFocusModeForTerminal: (id: string) => void
   theme: 'dark' | 'light'
@@ -27,6 +28,7 @@ export function TileLayout({
   onTerminalStateChange,
   onTerminalCwdChange,
   onOpenWorktree,
+  openTerminalCwds,
   focusMode,
   onToggleFocusModeForTerminal,
   theme
@@ -75,6 +77,7 @@ export function TileLayout({
               onStateChange={(state) => onTerminalStateChange(terminal.id, state)}
               onCwdChange={(cwd) => onTerminalCwdChange(terminal.id, cwd)}
               onOpenWorktree={onOpenWorktree}
+              openTerminalCwds={openTerminalCwds}
               isFocused={terminal.id === focusedId}
               isInFocusMode={focusMode && terminal.id === focusedId}
               onToggleFocusMode={() => onToggleFocusModeForTerminal(terminal.id)}

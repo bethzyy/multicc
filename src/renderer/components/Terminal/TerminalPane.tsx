@@ -10,6 +10,7 @@ import { getXTermTheme } from '../../hooks/useTheme'
 import { ScrollbackDeduplicator, lastCursorVisibility, containsStatefulSequences } from '../../utils/ScrollbackDeduplicator'
 import { formatCwd } from '../../utils/formatCwd'
 import { statusDotClass } from '../../utils/statusDotClass'
+import { normalizePath } from '@shared/utils/path'
 import { WorktreePopover } from '../Worktree/WorktreePopover'
 
 interface TerminalPaneProps {
@@ -20,7 +21,9 @@ interface TerminalPaneProps {
   onMinimize: () => void
   onStateChange: (state: string) => void
   onCwdChange: (cwd: string) => void
-  onOpenWorktree: (path: string) => void
+  onOpenWorktree: (path: string, setupCommand?: string) => void
+  /** 所有已打开终端的 cwd，供 worktree 删除前占用检测 */
+  openTerminalCwds: string[]
   isFocused: boolean
   isInFocusMode?: boolean
   onToggleFocusMode?: () => void
@@ -57,13 +60,10 @@ function getDedupEnabled(): boolean {
 
 // 从 cwd 路径检测 worktree 项目信息
 function getWorktreeInfo(cwd: string): { projectName: string } | null {
-  const markerPos = cwd.indexOf('/.worktrees/')
-  const markerPosWin = cwd.indexOf('\\.worktrees\\')
-  const idx = markerPos >= 0 ? markerPos : markerPosWin
+  const normalized = normalizePath(cwd)
+  const idx = normalized.indexOf('/.worktrees/')
   if (idx < 0) return null
-  const separator = markerPos >= 0 ? '/' : '\\'
-  const projectPath = cwd.substring(0, idx)
-  const projectName = projectPath.split(separator).pop() || ''
+  const projectName = normalized.substring(0, idx).split('/').pop() || ''
   return projectName ? { projectName } : null
 }
 
@@ -76,6 +76,7 @@ export function TerminalPane({
   onStateChange,
   onCwdChange,
   onOpenWorktree,
+  openTerminalCwds,
   isFocused,
   isInFocusMode = false,
   onToggleFocusMode,
@@ -179,7 +180,13 @@ export function TerminalPane({
 
     // 创建 PTY 进程
     const { cols, rows } = xterm
-    window.electron.terminal.create(terminal.id, cols, rows, terminal.cwd)
+    window.electron.terminal.create(terminal.id, cols, rows, terminal.cwd).then(() => {
+      // worktree setup 命令：在新终端中自动执行（用户可见、可中断）。
+      // PTY 输入由管道缓冲，shell 就绪后即执行，无需等待提示符。
+      if (terminal.initialCommand) {
+        window.electron.terminal.write(terminal.id, terminal.initialCommand + '\r')
+      }
+    })
 
     // 监听终端数据（来自主进程）
     // 使用 requestAnimationFrame 批处理写入，防止重负载时渲染器被淹没
@@ -608,10 +615,11 @@ export function TerminalPane({
           open={showWorktreePopover}
           anchorRect={worktreeAnchorRect}
           onClose={() => { setShowWorktreePopover(false); setWorktreeAnchorRect(null) }}
-          onOpenWorktree={(path) => {
-            onOpenWorktree(path)
+          onOpenWorktree={(path, setupCommand) => {
+            onOpenWorktree(path, setupCommand)
             setShowWorktreePopover(false)
           }}
+          openTerminalCwds={openTerminalCwds}
         />
       )}
     </div>

@@ -86,5 +86,7 @@ export const IPC_CHANNELS = {
     CREATE: 'worktree:create',
     RENAME: 'worktree:rename',
     REMOVE: 'worktree:remove',
+    GET_STATUS: 'worktree:get-status',
+    MERGE: 'worktree:merge',
   },
 } as const;

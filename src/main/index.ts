@@ -227,7 +227,7 @@ function registerIpcHandlers() {
   registerToolsHandlers(mainWindow!, storeService)
 
   // Git Worktree 管理 (新增)
-  registerWorktreeHandlers()
+  registerWorktreeHandlers(configService)
 
   // Shell 工具 (打开文件管理器等)
   // 只接受已存在的目录，防止被用来启动任意可执行文件

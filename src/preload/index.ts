@@ -14,7 +14,7 @@ import type {
   CustomCommand,
   ToolsConfig,
 } from '../shared/types/tools.types'
-import type { WorktreeInfo } from '../shared/types/worktree.types'
+import type { WorktreeInfo, WorktreeSetup, WorktreeErrorCode } from '../shared/types/worktree.types'
 
 // 暴露给渲染进程的 API
 const electronAPI = {
@@ -325,17 +325,23 @@ const electronAPI = {
     detectRepo: (cwd: string): Promise<{ isRepo: boolean; repoPath?: string; branch?: string }> =>
       ipcRenderer.invoke('worktree:detect-repo', cwd),
 
-    list: (repoPath: string): Promise<WorktreeInfo[]> =>
+    list: (repoPath: string): Promise<{ worktrees: WorktreeInfo[]; setup?: WorktreeSetup; error?: string }> =>
       ipcRenderer.invoke('worktree:list', repoPath),
 
-    create: (repoPath: string): Promise<{ success: boolean; worktreePath?: string; branch?: string; error?: string }> =>
+    create: (repoPath: string): Promise<{ success: boolean; worktreePath?: string; branch?: string; setupCommand?: string; code?: WorktreeErrorCode; error?: string }> =>
       ipcRenderer.invoke('worktree:create', repoPath),
 
-    rename: (worktreePath: string, newBranch: string): Promise<{ success: boolean; error?: string }> =>
+    rename: (worktreePath: string, newBranch: string): Promise<{ success: boolean; code?: WorktreeErrorCode; error?: string }> =>
       ipcRenderer.invoke('worktree:rename', worktreePath, newBranch),
 
-    remove: (worktreePath: string, force?: boolean): Promise<{ success: boolean; error?: string }> =>
+    remove: (worktreePath: string, force?: boolean): Promise<{ success: boolean; code?: WorktreeErrorCode; error?: string }> =>
       ipcRenderer.invoke('worktree:remove', worktreePath, force),
+
+    getStatus: (worktreePath: string): Promise<{ success: boolean; dirtyCount?: number; unmergedCount?: number; branch?: string; code?: WorktreeErrorCode; error?: string }> =>
+      ipcRenderer.invoke('worktree:get-status', worktreePath),
+
+    merge: (worktreePath: string): Promise<{ success: boolean; merged?: boolean; mainBranch?: string; code?: WorktreeErrorCode; error?: string }> =>
+      ipcRenderer.invoke('worktree:merge', worktreePath),
   },
 
   // Shell 工具

@@ -18,6 +18,8 @@ export interface TerminalInstance {
   cwd: string
   state?: 'running' | 'waiting_input' | 'busy' | 'idle'
   minimized?: boolean
+  /** PTY 创建后自动键入执行的命令（worktree setup 用） */
+  initialCommand?: string
 }
 
 function App() {
@@ -43,14 +45,15 @@ function App() {
   }, [])
 
   // 创建新终端
-  const createTerminal = useCallback((cwd?: string) => {
+  const createTerminal = useCallback((cwd?: string, initialCommand?: string) => {
     console.log('[App] createTerminal called, cwd:', cwd)
     const id = uuidv4()
     const terminal: TerminalInstance = {
       id,
       name: `终端 ${terminals.length + 1}`,
       cwd: cwd || '',
-      state: 'running'
+      state: 'running',
+      initialCommand
     }
     console.log('[App] new terminal:', terminal)
     setTerminals(prev => [...prev, terminal])
@@ -184,9 +187,9 @@ function App() {
     }
   }, [hasWaitingTerminal])
 
-  // 在 worktree 路径创建新终端
-  const openWorktreeTerminal = useCallback((path: string) => {
-    createTerminal(path)
+  // 在 worktree 路径创建新终端；setupCommand（如 npm install）在新终端中自动执行
+  const openWorktreeTerminal = useCallback((path: string, setupCommand?: string) => {
+    createTerminal(path, setupCommand)
   }, [createTerminal])
 
   // 初始化：创建第一个终端
@@ -337,6 +340,7 @@ function App() {
             onTerminalStateChange={handleTerminalStateChange}
             onTerminalCwdChange={handleTerminalCwdChange}
             onOpenWorktree={openWorktreeTerminal}
+            openTerminalCwds={terminals.map(t => t.cwd).filter(Boolean)}
             focusMode={focusMode}
             onToggleFocusModeForTerminal={toggleFocusModeForTerminal}
             theme={theme}

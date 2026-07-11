@@ -20,7 +20,7 @@ import type {
   CustomCommand,
   ToolsConfig,
 } from './tools.types';
-import type { WorktreeInfo } from './worktree.types';
+import type { WorktreeInfo, WorktreeSetup, WorktreeErrorCode } from './worktree.types';
 
 declare global {
   interface Window {
@@ -152,10 +152,12 @@ declare global {
       // Git Worktree management
       worktree: {
         detectRepo: (cwd: string) => Promise<{ isRepo: boolean; repoPath?: string; branch?: string }>;
-        list: (repoPath: string) => Promise<WorktreeInfo[]>;
-        create: (repoPath: string) => Promise<{ success: boolean; worktreePath?: string; branch?: string; error?: string }>;
-        rename: (worktreePath: string, newBranch: string) => Promise<{ success: boolean; error?: string }>;
-        remove: (worktreePath: string, force?: boolean) => Promise<{ success: boolean; error?: string }>;
+        list: (repoPath: string) => Promise<{ worktrees: WorktreeInfo[]; setup?: WorktreeSetup; error?: string }>;
+        create: (repoPath: string) => Promise<{ success: boolean; worktreePath?: string; branch?: string; setupCommand?: string; code?: WorktreeErrorCode; error?: string }>;
+        rename: (worktreePath: string, newBranch: string) => Promise<{ success: boolean; code?: WorktreeErrorCode; error?: string }>;
+        remove: (worktreePath: string, force?: boolean) => Promise<{ success: boolean; code?: WorktreeErrorCode; error?: string }>;
+        getStatus: (worktreePath: string) => Promise<{ success: boolean; dirtyCount?: number; unmergedCount?: number; branch?: string; code?: WorktreeErrorCode; error?: string }>;
+        merge: (worktreePath: string) => Promise<{ success: boolean; merged?: boolean; mainBranch?: string; code?: WorktreeErrorCode; error?: string }>;
       };
 
       shell: {
