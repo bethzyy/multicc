@@ -10,10 +10,15 @@ import { registerToolsHandlers } from './ipc/tools-handlers'
 import { registerMarketplaceHandlers } from './ipc/marketplace-handlers'
 import { registerWorktreeHandlers } from './ipc/worktree-handlers'
 import { isValidWorkingDir, isUrlSafe } from './utils/security'
+import { initMainLogger } from './services/logger'
 
 // 禁用 GPU 缓存警告
 app.commandLine.appendSwitch('disable-gpu-cache')
 app.commandLine.appendSwitch('disable-software-rasterizer')
+
+// 持久化日志（%APPDATA%/multicc/logs/main.log）：console.* 全部落盘。
+// 必须先于所有 console 调用初始化，否则早期日志（含 uncaughtException）不进文件。
+initMainLogger()
 
 // H10: 全局错误处理
 process.on('uncaughtException', (error) => {

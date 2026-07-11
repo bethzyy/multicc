@@ -1,6 +1,6 @@
 import * as pty from '@lydell/node-pty'
 import { BrowserWindow, app } from 'electron'
-import { exec, execSync } from 'child_process'
+import { exec } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import { promisify } from 'util'
@@ -13,9 +13,11 @@ import {
   resetInputDetector,
   isRealUserInput
 } from './terminal/OscParser'
-import { detectForegroundProcessAsync, getChildPidsAsync } from './terminal/WindowsProcessDetector'
+import { detectForegroundProcessAsync } from './terminal/WindowsProcessDetector'
 import { OutputRateMonitor } from './terminal/OutputRateMonitor'
 import { parsePromptCwd } from './terminal/PromptCwdParser'
+import { ResizeGovernor } from './terminal/ResizeGovernor'
+import { killProcessTree } from './terminal/ProcessKiller'
 
 const execAsync = promisify(exec)
 
@@ -113,6 +115,11 @@ export class PtyService {
   // 进程检测节流（Layer 4）
   private lastDetectionTime: Map<string, number> = new Map()
   private static readonly MIN_DETECTION_INTERVAL_MS = 3000  // 最少 3 秒间隔
+
+  // Resize 治理（去重 + 节流 + 疑似无响应守卫）——防 ConPTY 阻塞 RPC 冻结主线程
+  // 背景见 ResizeGovernor.ts 头注释（2026-07-11 AppHangXProcB1 事件）
+  private resizeGovernors: Map<string, ResizeGovernor> = new Map()
+  private resizeFlushTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
 
   // 前台进程检测开关（默认关闭）
   // 关闭原因：detectForegroundProcessAsync / tasklist 会反复 spawn 子进程，
@@ -255,22 +262,22 @@ export class PtyService {
   }
 
   /**
-   * 递归终止进程树
-   * 确保所有子进程都被清理，避免孤儿进程
+   * 安全销毁一个 PTY：先异步 taskkill 整棵进程树并确认根进程退出，再调 pty.kill()。
+   * pty.kill() 在 ConPTY 模式下是主线程阻塞调用，僵死子进程会把主线程堵死
+   * （2026-07-11 AppHangXProcB1 事件）；进程树确认死亡后再调用则不会等任何人。
+   * 未能确认退出时跳过 pty.kill()——宁可泄漏一份 conpty 句柄，不可冒险冻结主线程。
    */
-  private async cleanupProcessTree(pid: number) {
-    try {
-      const children = await getChildPidsAsync(pid)
-      for (const childPid of children) {
-        try {
-          process.kill(childPid, 'SIGTERM')
-          console.log('[PTY] Killed child process:', childPid)
-        } catch {
-          // 进程可能已不存在
-        }
+  private async killPtySafely(ptyProcess: pty.IPty): Promise<void> {
+    const pid = ptyProcess.pid
+    const confirmed = await killProcessTree(pid).catch(() => false)
+    if (confirmed) {
+      try {
+        ptyProcess.kill()
+      } catch {
+        // 进程已退出时 kill 可能抛错，忽略
       }
-    } catch (err) {
-      console.warn('[PTY] Failed to cleanup process tree for', pid, ':', err)
+    } else {
+      console.warn('[PTY] 进程树未能确认退出，跳过 pty.kill() 以避免主线程阻塞. pid:', pid)
     }
   }
 
@@ -333,10 +340,21 @@ export class PtyService {
       const rateMonitor = new OutputRateMonitor()
       this.rateMonitors.set(id, rateMonitor)
 
+      // Create resize governor for this terminal
+      this.resizeGovernors.set(id, new ResizeGovernor())
+
       // 监听输出 — 自适应处理
       ptyProcess.onData((data: string) => {
         if (this.isShuttingDown) return
         ptyDebugLog('OUT', id, data)
+
+        // 有输出 = 控制台宿主活着：解除 resize 疑似无响应守卫，补发挂起的 resize
+        const governor = this.resizeGovernors.get(id)
+        if (governor) {
+          governor.markAlive()
+          if (governor.hasPending) this.scheduleResizeFlush(id)
+        }
+
         const instance = this.instances.get(id)
         if (!instance) {
           this.batchSendData(id, data)
@@ -709,12 +727,63 @@ export class PtyService {
     // 钳制到安全下限：拒绝 0 / NaN / 负数，避免极端尺寸把 conpty 弄崩导致进程退出
     const safeCols = Math.max(1, Math.floor(Number(cols)) || 1)
     const safeRows = Math.max(1, Math.floor(Number(rows)) || 1)
-    ptyDebugMeta(id, `resize cols=${safeCols} rows=${safeRows}`)
+
+    // 经 ResizeGovernor 治理：去重 + 节流 + 疑似无响应守卫
+    // （ConPTY resize 是主线程阻塞 RPC，宿主僵死时会冻结整个应用）
+    let governor = this.resizeGovernors.get(id)
+    if (!governor) {
+      governor = new ResizeGovernor()
+      this.resizeGovernors.set(id, governor)
+    }
+    const action = governor.request(safeCols, safeRows, Date.now())
+    ptyDebugMeta(id, `resize cols=${safeCols} rows=${safeRows} action=${action}`)
+    if (action === 'apply') {
+      this.applyResize(id, instance, governor, safeCols, safeRows)
+    } else if (action === 'defer') {
+      this.scheduleResizeFlush(id)
+    }
+    // 'skip'：与已生效尺寸相同，什么都不做
+  }
+
+  /** 执行原生 resize 并回报耗时；超阈值时 Governor 进入 suspect，暂停后续 resize */
+  private applyResize(
+    id: string,
+    instance: PtyInstance,
+    governor: ResizeGovernor,
+    cols: number,
+    rows: number
+  ): void {
+    const start = Date.now()
     try {
-      instance.pty.resize(safeCols, safeRows)
+      instance.pty.resize(cols, rows)
     } catch {
       // 进程可能已退出；静默忽略，避免影响主流程
     }
+    const duration = Date.now() - start
+    governor.recordApply(cols, rows, start, duration)
+    if (governor.isSuspect) {
+      console.warn(
+        `[PTY] resize 耗时 ${duration}ms（终端 ${id}）—— 控制台宿主疑似无响应，` +
+        '暂停该终端后续 resize，待其恢复输出后自动补发'
+      )
+    }
+  }
+
+  /** 调度尾随 flush：throttleMs 后应用最新挂起尺寸（每终端同时最多一个定时器） */
+  private scheduleResizeFlush(id: string): void {
+    if (this.resizeFlushTimers.has(id)) return
+    const delay = this.resizeGovernors.get(id)?.flushDelayMs ?? 150
+    this.resizeFlushTimers.set(id, setTimeout(() => {
+      this.resizeFlushTimers.delete(id)
+      if (this.isShuttingDown) return
+      const instance = this.instances.get(id)
+      const governor = this.resizeGovernors.get(id)
+      if (!instance || !governor) return
+      const dims = governor.flush()
+      if (dims) {
+        this.applyResize(id, instance, governor, dims.cols, dims.rows)
+      }
+    }, delay))
   }
 
   /**
@@ -746,6 +815,14 @@ export class PtyService {
     // 清理速率监控
     this.rateMonitors.delete(id)
 
+    // 清理 resize 治理器与挂起的 flush 定时器
+    const resizeTimer = this.resizeFlushTimers.get(id)
+    if (resizeTimer) {
+      clearTimeout(resizeTimer)
+      this.resizeFlushTimers.delete(id)
+    }
+    this.resizeGovernors.delete(id)
+
     // 清理进程检测时间记录
     this.lastDetectionTime.delete(id)
 
@@ -771,12 +848,12 @@ export class PtyService {
       // 统一簿记清理
       this.cleanupTerminalResources(id)
 
-      // 递归终止进程树
-      const pid = instance.pty.pid
-      this.cleanupProcessTree(pid).catch(() => {})
-
-      instance.pty.kill()
+      // 先删实例：onExit 回调据此跳过"进程自发退出"分支，不发多余 terminal:exit
       this.instances.delete(id)
+
+      // 异步安全销毁：taskkill 进程树 → 确认退出 → pty.kill()（不阻塞主线程）
+      void this.killPtySafely(instance.pty)
+
       console.log('[PTY] Terminal destroyed:', id)
     }
   }
@@ -808,16 +885,17 @@ export class PtyService {
     this.detectingPids.clear()
     this.lastDetectionTime.clear()
 
-    // 递归终止所有进程树（await 完成）
-    const instances = Array.from(this.instances.values())
-    await Promise.all(
-      instances.map(instance => this.cleanupProcessTree(instance.pty.pid).catch(() => {}))
-    )
-
-    // 再销毁所有 PTY 进程
-    for (const instance of instances) {
-      instance.pty.kill()
+    // 清理 resize 治理
+    for (const timer of this.resizeFlushTimers.values()) {
+      clearTimeout(timer)
     }
+    this.resizeFlushTimers.clear()
+    this.resizeGovernors.clear()
+
+    // 并行安全销毁所有 PTY：taskkill 进程树 → 确认退出 → pty.kill()
+    // （index.ts before-quit 有 3s 强退兜底，killProcessTree 默认 2.5s 超时在其之内）
+    const instances = Array.from(this.instances.values())
+    await Promise.all(instances.map(instance => this.killPtySafely(instance.pty)))
 
     this.instances.clear()
     this.stateDebouncers.clear()
