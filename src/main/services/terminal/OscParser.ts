@@ -193,13 +193,17 @@ const ESC_CANCEL_PATTERN = /Esc\s*to\s*cancel/
 const QUESTION_LINE_PATTERN = /\?\s*$/m
 const NUMBERED_OPTION_PATTERN = /❯\s*\d+\./
 
-// Generic interactive prompt patterns
+// 高精度 y/n 提示（既进入报警触发器，也算「持续阻塞」信号）
+const YN_PAREN_PATTERN = /\([yYnN]\/[yYnN]\)/    // "(y/n)"
+const YN_BRACKET_PATTERN = /\[[yYnN]\/[yYnN]\]/  // "[y/N]"
+
+// Generic interactive prompt patterns —— 顺序固定，reason 用下标(generic:N)，勿重排
 const GENERIC_PATTERNS = [
-  /^\s*\?\s+.+[:：]\s*$/m,    // "? Select an option:"
-  /\([yYnN]\/[yYnN]\)/,      // "(y/n)"
-  /\[[yYnN]\/[yYnN]\]/,      // "[y/N]"
-  /press\s*(any\s*)?key/i,   // "press any key"
-  /enter\s*to\s*continue/i,  // "Enter to continue"
+  /^\s*\?\s+.+[:：]\s*$/m,    // 0: "? Select an option:"
+  YN_PAREN_PATTERN,          // 1: "(y/n)"
+  YN_BRACKET_PATTERN,        // 2: "[y/N]"
+  /press\s*(any\s*)?key/i,   // 3: "press any key"
+  /enter\s*to\s*continue/i,  // 4: "Enter to continue"
 ]
 
 // Exclude patterns: avoid false positives on progress bars etc.
@@ -269,6 +273,24 @@ export function matchWaitingInputText(rawText: string): WaitingInputResult {
   return { matched: false, reason: 'none' }
 }
 
+/**
+ * 高精度「阻塞式提示框」判定——用于判断红灯是否应【持续】，区别于 matchWaitingInputText 的
+ * 【报警触发】。只认屏幕上会持续显示、真正等你操作的提示：Claude 的 Esc-to-cancel、
+ * 数字选择菜单(❯ N. + ?)、(y/n)/[y/N]。
+ *
+ * 刻意排除 press-any-key / enter-to-continue / "? …:" / 裸 BEL —— 这些是一次性提醒（如 shell
+ * 的 pause、任务完成响铃）：触发报警响一声即可，屏幕上没有可靠、持续的标记，不应把灯一直摁红。
+ * 因此它们仍走 matchWaitingInputText 点亮红灯并响铃，但随后由自愈逻辑复位（见 computeSelfHealState）。
+ */
+export function matchBlockingPrompt(rawText: string): boolean {
+  const normalized = normalizeBorders(stripAnsi(rawText))
+  if (ESC_CANCEL_PATTERN.test(normalized)) return true
+  if (NUMBERED_OPTION_PATTERN.test(normalized) && /\?/.test(normalized)) return true
+  if (QUESTION_LINE_PATTERN.test(normalized) && NUMBERED_OPTION_PATTERN.test(normalized)) return true
+  if (YN_PAREN_PATTERN.test(normalized) || YN_BRACKET_PATTERN.test(normalized)) return true
+  return false
+}
+
 // Per-terminal rolling buffers (same as muxvo)
 const inputBuffers = new Map<string, string>()
 const ROLLING_MAX = 2000
@@ -306,6 +328,38 @@ export function resetInputDetector(terminalId: string): void {
   inputBuffers.delete(terminalId)
 }
 
+/** 终端状态灯：running/busy=绿，waiting_input=红，idle=灰 */
+export type TerminalStatus = 'running' | 'busy' | 'waiting_input' | 'idle'
+
+/**
+ * 自愈状态决策（纯函数）。「边沿触发报警 + 电平自愈」里的电平部分集中在此，便于单测。
+ *
+ * 关键约束：本函数【永不制造红灯】—— waiting_input 只由输出边沿检测（BEL/matchWaitingInputText）
+ * 产生。这里只负责两件事：红灯在阻塞框消失后复位、静默后回到中性灰。这样即便旧的提示框文本还
+ * 残留在缓冲里（Claude 用 ANSI 覆盖重绘、并不重发干净文本），也不会被误判而反复点红。
+ *
+ * - waiting_input + 阻塞框仍在   → 保持红
+ * - waiting_input + 已静默       → 灰（一次性提醒/响铃在安静后自愈）
+ * - waiting_input + 有新活动     → 绿（Q2：新活动自动复位）
+ * - 非红灯 + 已静默              → 灰（Q1：跑完/空闲回到中性灰）
+ * - 非红灯 + 未静默              → 维持（running/busy 保持绿）
+ */
+export function computeSelfHealState(args: {
+  current: TerminalStatus
+  blockingVisible: boolean
+  msSinceLastOutput: number
+  idleAfterMs: number
+}): TerminalStatus {
+  const { current, blockingVisible, msSinceLastOutput, idleAfterMs } = args
+  if (current === 'waiting_input') {
+    if (blockingVisible) return 'waiting_input'
+    if (msSinceLastOutput >= idleAfterMs) return 'idle'
+    return 'running'
+  }
+  if (msSinceLastOutput >= idleAfterMs) return 'idle'
+  return current
+}
+
 /**
  * Debounced state change notifier
  * Prevents rapid state changes from causing UI flicker
@@ -320,7 +374,17 @@ export class StateChangeDebouncer {
   }
 
   notify(newState: string, callback: (state: string) => void): void {
-    if (newState === this.lastState) return;
+    if (newState === this.lastState) {
+      // 目标已回到「最近实际发出的状态」：必须取消任何待发的、指向【其它】状态的定时器，
+      // 否则那个陈旧的 emit 仍会触发，把已收敛的状态又改回去。
+      // 典型场景：50ms 内 running→waiting_input→running（如 "press any key" 点红后新输出立刻自愈），
+      // 若不取消，陈旧的 waiting_input emit 会让红灯凭空亮着（正是本次修复要根治的「粘滞红灯」）。
+      if (this.timer) {
+        clearTimeout(this.timer);
+        this.timer = null;
+      }
+      return;
+    }
 
     if (this.timer) {
       clearTimeout(this.timer);

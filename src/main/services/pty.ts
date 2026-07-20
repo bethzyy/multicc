@@ -11,7 +11,10 @@ import {
   detectBellSignal,
   detectWaitingInputDetailed,
   resetInputDetector,
-  isRealUserInput
+  isRealUserInput,
+  matchBlockingPrompt,
+  computeSelfHealState,
+  type TerminalStatus
 } from './terminal/OscParser'
 import { detectForegroundProcessAsync } from './terminal/WindowsProcessDetector'
 import { OutputRateMonitor } from './terminal/OutputRateMonitor'
@@ -88,7 +91,8 @@ interface PtyInstance {
   bufferChunks: string[]    // Array-based buffer (avoids string concat GC pressure)
   bufferLength: number      // Tracked incrementally
   cwd: string | null
-  state: 'running' | 'waiting_input' | 'busy'
+  state: TerminalStatus     // running/busy=绿，waiting_input=红，idle=灰
+  lastOutputAt: number      // 最近一次收到输出的时间戳（自愈：静默→灰的判据）
   foregroundProcess: string | null
   foregroundProcessPid: number | null  // 缓存进程 PID，用于轻量级存在性检查
   lastPolledPid: number | null  // 上次轮询检测到的进程 PID（用于智能跳过）
@@ -133,6 +137,13 @@ export class PtyService {
   private pollQueue: string[] = []  // 终端 ID 队列
   private currentPollIndex = 0
   private static readonly POLL_INTERVAL_MS = 5000  // 从 2 秒增加到 5 秒
+
+  // 状态自愈扫描器：把红灯从「粘滞陷阱」改成「电平自愈」。
+  // 每 tick 遍历所有终端，按 computeSelfHealState 决策：阻塞框消失→复位、静默→回中性灰。
+  // 独立于 5s 轮询（那是 round-robin 单个终端，太慢）；只做时间戳比较 + 一次缓冲尾正则，很轻。
+  private idleSweepTimer?: ReturnType<typeof setInterval>
+  private static readonly IDLE_SWEEP_MS = 1500      // 扫描间隔
+  private static readonly IDLE_AFTER_MS = 4000      // 静默多久算「空闲」→ 中性灰
 
   constructor(window: BrowserWindow) {
     this.window = window
@@ -262,6 +273,58 @@ export class PtyService {
   }
 
   /**
+   * 启动状态自愈扫描器（红灯电平自愈 + 静默回中性灰）。
+   * 遍历所有实例，用「最近输出时间」和「缓冲尾是否有持续阻塞框」交给 computeSelfHealState 决策。
+   * 关键：本扫描【绝不制造红灯】——红灯只由 processTerminalOutput 的输出边沿检测点亮；这里只负责
+   * 让红灯在阻塞框消失/安静后自愈，以及让跑完/空闲的终端回到中性灰。
+   */
+  private startIdleSweeper() {
+    if (this.idleSweepTimer) return
+    this.idleSweepTimer = setInterval(() => {
+      if (this.isShuttingDown || this.instances.size === 0) return
+      const now = Date.now()
+      for (const [id, instance] of this.instances) {
+        const blockingVisible = matchBlockingPrompt(this.getBufferTail(instance, 2000))
+        const target = computeSelfHealState({
+          current: instance.state,
+          blockingVisible,
+          msSinceLastOutput: now - instance.lastOutputAt,
+          idleAfterMs: PtyService.IDLE_AFTER_MS,
+        })
+        if (target !== instance.state) {
+          if (target === 'running' || target === 'idle') resetInputDetector(id)
+          this.setState(id, instance, target, 'idle-sweep')
+        }
+      }
+    }, PtyService.IDLE_SWEEP_MS)
+  }
+
+  /**
+   * 停止状态自愈扫描器
+   */
+  private stopIdleSweeper() {
+    if (this.idleSweepTimer) {
+      clearInterval(this.idleSweepTimer)
+      this.idleSweepTimer = undefined
+    }
+  }
+
+  /**
+   * 统一状态发送：更新 instance.state 并经 50ms 防抖推送 terminal:state:<id>。
+   * 输出路径与自愈扫描器共用；相同状态直接返回，避免无谓 IPC。
+   */
+  private setState(id: string, instance: PtyInstance, newState: TerminalStatus, reason: string): void {
+    if (instance.state === newState) return
+    ptyStateLog(id, `${instance.state} -> ${newState} (${reason})`)
+    instance.state = newState
+    const debouncer = this.stateDebouncers.get(id)
+    if (!debouncer) return
+    debouncer.notify(newState, (s) => {
+      this.safeSend(`terminal:state:${id}`, s)
+    })
+  }
+
+  /**
    * 安全销毁一个 PTY：先异步 taskkill 整棵进程树并确认根进程退出，再调 pty.kill()。
    * pty.kill() 在 ConPTY 模式下是主线程阻塞调用，僵死子进程会把主线程堵死
    * （2026-07-11 AppHangXProcB1 事件）；进程树确认死亡后再调用则不会等任何人。
@@ -361,6 +424,9 @@ export class PtyService {
           return
         }
 
+        // 记录最近输出时间——自愈扫描器据此判断「静默→中性灰」
+        instance.lastOutputAt = Date.now()
+
         // --- Buffer management (array-based) ---
         instance.bufferChunks.push(data)
         instance.bufferLength += data.length
@@ -427,6 +493,7 @@ export class PtyService {
         bufferLength: 0,
         cwd: workingDir,
         state: 'running',
+        lastOutputAt: Date.now(),
         foregroundProcess: null,
         foregroundProcessPid: null,
         lastPolledPid: null
@@ -438,6 +505,7 @@ export class PtyService {
       // 添加到统一轮询队列（Phase 1 优化：替代独立定时器）
       this.pollQueue.push(id)
       this.startGlobalPoller()
+      this.startIdleSweeper()
 
       console.log('[PTY] Total instances:', this.instances.size)
 
@@ -467,67 +535,55 @@ export class PtyService {
       }
     }
 
-    // 状态防抖器：所有状态变更经过 50ms debounce，防止密集输出导致的状态振荡
-    const debouncer = this.stateDebouncers.get(id)
-    if (!debouncer) return
+    // 无防抖器（异常情况）直接跳过状态处理（状态迁移统一走 this.setState）
+    if (!this.stateDebouncers.has(id)) return
 
-    // 统一状态发送（通过 debouncer）
-    const sendState = (newState: string, reason: string) => {
-      if (instance.state !== newState) {
-        ptyStateLog(id, `${instance.state} -> ${newState} (${reason})`)
-        instance.state = newState
-        debouncer.notify(newState, (s) => {
-          this.safeSend(`terminal:state:${id}`, s)
-        })
-      }
-    }
+    // 用本 chunk 处理前的状态做「报警 vs 自愈」的分支判定，避免同一 chunk 内先点红又被复位抵消
+    const prevState = instance.state
 
-    // 命令状态检测（OSC133）
+    // 命令状态检测（OSC133）：命令开始→busy(绿)。命令结束/提示符就绪不在此强制切换——
+    // 交给自愈扫描器按「静默」统一收敛到中性灰，避免与下面的报警/复位在同一 chunk 抢状态。
     const osc133 = sequences.filter(s => s.type === 'osc133')
     const commandStarted = osc133.some(s => s.value === 'B' || s.value === 'C')
-    const commandEnded = osc133.some(s => s.value === 'D')
-    const isPromptReady = osc133.some(s => s.value === 'A')
+    if (commandStarted) {
+      instance.foregroundProcess = 'pending'
+      this.setState(id, instance, 'busy', 'osc133:commandStart')
 
-    // OSC133 处理：一旦进入 waiting_input，不再处理 OSC133（只有用户输入能切回 running）
-    // 参考 muxvo：muxvo 完全不处理 OSC133 状态，我们保留但加保护
-    if (instance.state !== 'waiting_input') {
-      if (commandStarted) {
-        sendState('busy', 'osc133:commandStart')
-        instance.foregroundProcess = 'pending'
+      // 前台进程检测（默认关闭，见 FOREGROUND_DETECTION_ENABLED）
+      if (PtyService.FOREGROUND_DETECTION_ENABLED) {
+        const monitor = this.rateMonitors.get(id)
+        const lastDetect = this.lastDetectionTime.get(id) || 0
+        const now = Date.now()
+        const tooRecent = (now - lastDetect) < PtyService.MIN_DETECTION_INTERVAL_MS
+        const heavyOutput = monitor?.isHeavyOutput ?? false
 
-        // 前台进程检测（默认关闭，见 FOREGROUND_DETECTION_ENABLED）
-        if (PtyService.FOREGROUND_DETECTION_ENABLED) {
-          const monitor = this.rateMonitors.get(id)
-          const lastDetect = this.lastDetectionTime.get(id) || 0
-          const now = Date.now()
-          const tooRecent = (now - lastDetect) < PtyService.MIN_DETECTION_INTERVAL_MS
-          const heavyOutput = monitor?.isHeavyOutput ?? false
-
-          if (!this.detectingPids.has(id) && !heavyOutput && !tooRecent) {
-            this.lastDetectionTime.set(id, now)
-            this.detectForegroundProcessAsyncHandler(id, instance)
-          }
+        if (!this.detectingPids.has(id) && !heavyOutput && !tooRecent) {
+          this.lastDetectionTime.set(id, now)
+          this.detectForegroundProcessAsyncHandler(id, instance)
         }
-      } else if (commandEnded) {
-        instance.foregroundProcess = null
-        instance.foregroundProcessPid = null
-        sendState('running', 'osc133:commandEnd')
-      } else if (isPromptReady) {
-        sendState('running', 'osc133:promptReady')
       }
     }
 
-    // WaitingInput 检测：Running 或 Busy 状态下触发（参考 muxvo manager.ts L233）
-    // 注意 Busy 也要检测：shell 启用 OSC133 时，运行 claude 会让状态停在 Busy，
-    // 此时若漏检则 Busy→WaitingInput 永远不会发生（红灯失效）
-    // 1. 独立 BEL 信号（排除 OSC 终止符中的 BEL）
-    // 2. 滚动缓冲区文本模式匹配（"Esc to cancel"、y/n 提示等）
-    if (instance.state === 'running' || instance.state === 'busy') {
+    // 报警边沿 vs 自愈复位（分离处理，互不抵消）
+    if (prevState !== 'waiting_input') {
+      // 报警触发：BEL 或等待文本命中 → 点红（渲染端据此响铃一次）。
+      // 一次性提醒（shell 的 pause / 任务完成响铃）也在此点红，随后由自愈逻辑（blockingVisible/静默）复位。
       const hasBell = detectBellSignal(data)
       const detection = detectWaitingInputDetailed(data, id)
       if (hasBell || detection.matched) {
         resetInputDetector(id)
-        sendState('waiting_input', hasBell ? 'bell' : `text:${detection.reason}`)
+        this.setState(id, instance, 'waiting_input', hasBell ? 'bell' : `text:${detection.reason}`)
+      } else if (prevState === 'idle') {
+        // 之前是灰（静默过），现在又来新输出且非等待 → 活动恢复，回到绿
+        this.setState(id, instance, 'running', 'idle->running:output')
+      }
+    } else {
+      // 当前红灯，且这是【后续】新活动（触发点红的那个 chunk prevState 不是 waiting，不会走到这）：
+      // 屏幕上已无持续阻塞框 → 自动复位为绿（新活动自动复位）；真实批准框仍在则保持红。
+      const blockingVisible = matchBlockingPrompt(this.getBufferTail(instance, 2000))
+      if (!blockingVisible) {
+        resetInputDetector(id)
+        this.setState(id, instance, 'running', 'waiting->running:no-blocking')
       }
     }
   }
@@ -705,15 +761,8 @@ export class PtyService {
       // 仅在 data 含真实键入时解除红灯：点击/聚焦 pane 时 TUI(?1004h/鼠标追踪)会经
       // xterm.onData 自动发出 focus/鼠标上报，这些不是敲键，不应让红灯变绿。
       if (instance.state === 'waiting_input' && isRealUserInput(data)) {
-        ptyStateLog(id, 'waiting_input -> running (user-input)')
-        instance.state = 'running'
         resetInputDetector(id)
-        const debouncer = this.stateDebouncers.get(id)
-        if (debouncer) {
-          debouncer.notify('running', (s) => {
-            this.safeSend(`terminal:state:${id}`, s)
-          })
-        }
+        this.setState(id, instance, 'running', 'user-input')
       }
       instance.pty.write(data)
     } else {
@@ -861,8 +910,9 @@ export class PtyService {
   async destroyAll(): Promise<void> {
     this.isShuttingDown = true
 
-    // 停止统一轮询调度器
+    // 停止统一轮询调度器 + 状态自愈扫描器
     this.stopGlobalPoller()
+    this.stopIdleSweeper()
     this.pollQueue = []
     this.currentPollIndex = 0
 
