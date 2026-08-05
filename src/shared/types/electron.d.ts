@@ -21,6 +21,7 @@ import type {
   ToolsConfig,
 } from './tools.types';
 import type { WorktreeInfo, WorktreeSetup, WorktreeErrorCode } from './worktree.types';
+import type { TerminalCreateResult } from './terminal.types';
 
 declare global {
   interface Window {
@@ -35,7 +36,7 @@ declare global {
 
       // Terminal operations
       terminal: {
-        create: (id: string, cols: number, rows: number, cwd?: string) => Promise<boolean>;
+        create: (id: string, cols: number, rows: number, cwd?: string) => Promise<TerminalCreateResult>;
         write: (id: string, data: string) => void;
         resize: (id: string, cols: number, rows: number) => Promise<void>;
         destroy: (id: string) => Promise<void>;

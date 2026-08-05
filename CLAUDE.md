@@ -244,6 +244,8 @@ window.electron.app.setOverlayBadge(hasWaiting)  // 任务栏图标红点徽章
 
 - **node-pty 编译问题**：使用 `@lydell/node-pty` 预编译版本，安装时加 `--ignore-scripts`
 - **React.StrictMode 双重渲染**：已移除 StrictMode（会导致 PTY 双重创建）
+- **长回复流式期间滚动条不出现（上游固有，勿修）**：经典渲染器（`CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`）流式输出长回复时在视口内原地重绘预览，整块内容只在**该块完成时**一次性 commit 进 scrollback（2026-08-05 取证：238 行代码块以单帧 14.5KB 在流式结束瞬间落入 scrollback，流式期间 baseY 恒为 0）。期间终端没有收到任何可滚动内容，滚动条物理上不可能出现；块完成后立即出现（已实机验证）。官方文档确认经典渲染器无渐进式 commit 开关，属架构行为。用户手动最大化+还原能"提前"出滚动条，是 resize 收缩路径把当前视口行推入 scrollback 的副作用，仅含当时可见的一屏，勿模仿做成自动化 hack
+- **镜像重复已随上游消失，ScrollbackDeduplicator 默认禁用（2026-08-05）**：早期"重绘把旧副本滚进 scrollback"的行为在现代栈（conpty.dll 1.23 + 2026-08 版 claude）已不存在（三次真实会话回放：scrollback 镜像重复为 0）。7/29"152 个重复块全部 stateful"的结论所用 36k 帧是 6 月 alt-screen 时代日志（当时 claude 尚未响应 `DISABLE_ALTERNATE_SCREEN`），不具代表性。去重器对 claude 流实测零作用，仅存"误杀 ≥8 行纯文本合法重复输出"（如同一命令跑两次）的风险，故默认禁用，`localStorage['multicc.dedup']='on'` 可临时开启排查（tests/unit/scrollback-dedup.test.ts 钉死默认关闭 + 类语义）
 
 ## Solved Issues
 
@@ -260,3 +262,4 @@ window.electron.app.setOverlayBadge(hasWaiting)  // 任务栏图标红点徽章
 | Installed 技能列表为空 | 未传 projectPath + 路径白名单过严 | 传 cwd + 扫描父目录 + 扩展白名单 |
 | 标题目录被 claude 输出污染/换目录重启不刷新 | 宽松正则全缓冲扫描猜 cwd | 行首锚定提示符解析 `parsePromptCwd`，无匹配即冻结 |
 | Worktree 一键强删丢数据 / current 徽章 Windows 失效 | 无脏检查直接 force + git 正斜杠 vs PTY 反斜杠路径比较 | 两段式删除（getStatus→确认）+ `normalizePath` 统一比较 |
+| resize 后内容重复+排版错乱（tile 增删/聚焦切换偶发） | xterm 默认 Unix 语义 resize（把 scrollback 旧行拉回视口）与 ConPTY "resize 后按自身模型全量重印" 冲突，重印叠在拉回的旧行上 | xterm `windowsPty` ConPTY 适配（`utils/xtermWindowsPty.ts`，含 winpty 回退跟随）+ PTY 按 fit 后尺寸创建 + Governor 同尺寸预热；回归测试 `tests/unit/xterm-windows-pty.test.ts` |

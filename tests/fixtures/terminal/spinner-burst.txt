@@ -1,0 +1,43 @@
+# 来源: %APPDATA%/multicc/pty-debug.log (MULTICC_PTY_LOG=1, 2026-06 实录)
+# 内容: Claude Code 经典渲染器 spinner 心跳——连续原地重绘帧(?25l/移动/重画/?25h)
+# 格式: 每行一个 PTY 数据帧, \e=ESC \r=CR \n=LF ␠=空格 \xNN=控制字节
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m*\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✶\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✻\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✽\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[2C\e[6A\e[38;2;235;159;127mL\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[3C\e[6A\e[38;2;235;159;127me\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[4C\e[6A\e[38;2;235;159;127mv\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[2C\e[6A\e[38;2;215;119;87mLe\e[6G\e[38;2;235;159;127mit\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[117C\e[4A\e[38;2;136;136;136m───\r\e[72C\e[3B\e[38;2;255;193;7mFast␠mode␠disabled␠·␠usage␠credit␠limit␠reached\e[39m\r\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[4C\e[6A\e[38;2;215;119;87mv\e[8G\e[38;2;235;159;127ma\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[5C\e[6A\e[38;2;215;119;87mi\e[9G\e[38;2;235;159;127mt\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✻\e[7Gt\e[10G\e[38;2;235;159;127mi\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[7C\e[6A\e[38;2;215;119;87mat\e[11G\e[38;2;235;159;127mng\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✶\e[10Gi\e[13G\e[38;2;235;159;127m…\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[10C\e[6A\e[38;2;215;119;87mn\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m*\e[12Gg…\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✢\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m·\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✢\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m*\e[3G\e[38;2;235;159;127mL\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[3C\e[6A\e[38;2;235;159;127me\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✶\e[5G\e[38;2;235;159;127mv\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[2C\e[6A\e[38;2;215;119;87mL\e[6G\e[38;2;235;159;127mi\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✻\e[4Gev\e[7G\e[38;2;235;159;127mta\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[5C\e[6A\e[38;2;215;119;87mi\e[9G\e[38;2;235;159;127mt\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6C\e[6A\e[38;2;215;119;87mt\e[10G\e[38;2;235;159;127mi\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✽\e[8Ga\e[11G\e[38;2;235;159;127mn\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[8C\e[6A\e[38;2;215;119;87mti\e[12G\e[38;2;235;159;127mg…\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[10C\e[6A\e[38;2;215;119;87mn\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[11C\e[6A\e[38;2;215;119;87mg\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[12C\e[6A\e[38;2;215;119;87m…\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✻\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✶\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m*\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m✢\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[6A\e[38;2;215;119;87m·\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[2C\e[6A\e[38;2;235;159;127mLe\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[4C\e[6A\e[38;2;235;159;127mv\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[2C\e[6A\e[38;2;215;119;87mLe\e[6G\e[38;2;235;159;127mit\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h
+\e[?25l\e[2D\e[3B\r\e[14C\e[6A\e[38;2;153;153;153m(5s␠·␠\e[38;2;161;161;161mthinking\e[38;2;153;153;153m)\e[39m\r\n\n\n\n\n\n\e[2C\e[3A\e[?25h

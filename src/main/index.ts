@@ -159,16 +159,16 @@ function registerIpcHandlers() {
       // C2: 参数验证
       if (!id || typeof id !== 'string') {
         console.warn('[Main] terminal:create rejected: invalid id')
-        return false
+        return { ok: false }
       }
       if (!Number.isInteger(cols) || cols < 1 || cols > 500 ||
           !Number.isInteger(rows) || rows < 1 || rows > 500) {
         console.warn('[Main] terminal:create rejected: invalid cols/rows', { cols, rows })
-        return false
+        return { ok: false }
       }
       if (cwd && !isValidWorkingDir(cwd)) {
         console.warn('[Main] terminal:create rejected: invalid cwd', { cwd })
-        return false
+        return { ok: false }
       }
       // cwd 为空时使用配置的默认工作目录，避免便携版回退到临时解压目录
       const resolvedCwd = (cwd && cwd.length > 0) ? cwd : configService.getDefaultWorkingDir()
@@ -176,7 +176,7 @@ function registerIpcHandlers() {
       return ptyService.create(id, cols, rows, resolvedCwd)
     } catch (error) {
       console.error('[Main] terminal:create error:', error)
-      return false
+      return { ok: false }
     }
   })
 

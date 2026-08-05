@@ -9,7 +9,38 @@
  * 策略：维护最近写入行的 hash 环形缓冲区。当新数据中连续 ≥8 行与缓冲区匹配、
  * 且总匹配率 ≥80% 时，跳过该次写入。不设时间窗口限制——Claude Code 的 re-render
  * 间隔通常数秒甚至数十秒，时间窗口会导致去重完全失效。
+ *
+ * 作用域界定（2026-07-29 取证，36k 真实帧回放）：ConPTY 输出的重绘帧全部携带
+ * 定位/擦除等状态序列，被下方 stateful 守卫全量放行（检出 152 个重复块、丢弃 0）
+ * ——这是设计约束而非失效：丢这类帧必然导致 xterm 与 ConPTY 屏幕模型失步。
+ * 本类只对"纯文本重复块"有效；resize 重印造成的可见重复由 xterm 的 windowsPty
+ * 适配根治（见 utils/xtermWindowsPty.ts）。改动守卫前先跑
+ * tests/unit/scrollback-dedup.test.ts，两条互斥需求都钉了用例。
+ *
+ * 【2026-08-05 复检：默认改为禁用（opt-in）】
+ * 滚动条问题取证（三次真实 claude 会话按帧回放 xterm-headless，见当日排查记录）：
+ * 1. 现代栈（conpty.dll 1.23 + 2026-08 版 claude 经典渲染器）下 scrollback 中
+ *    镜像重复为 0——本类的原始问题已在上游消失。7/29 结论所依据的 36k 帧是
+ *    6 月 alt-screen 时代的日志（当时 claude 尚未响应 DISABLE_ALTERNATE_SCREEN，
+ *    全程 ?1049h），对经典渲染器流不具代表性。
+ * 2. claude 全部帧（含大块 commit，实测单帧 14.5KB/238 行）都以光标显隐+定位
+ *    序列包裹 → stateful 守卫全放行 → 本类对 claude 流实测零作用（0/920 帧丢弃）。
+ * 3. 仅存的可触发场景是误杀：≥8 行纯文本重复的合法输出（如同一命令连续跑两次）
+ *    第二次会被整块吞掉——输出消失且 scrollback 不增长。
+ * 收益为零、风险为真，故 isDedupEnabled 默认 false，'multicc.dedup'='on' 才启用。
  */
+
+/**
+ * 去重开关（读 localStorage 'multicc.dedup'）。默认禁用，显式 'on' 才启用。
+ * 以回调形式注入读取器，便于单测与非浏览器环境（读取异常一律回退禁用）。
+ */
+export function isDedupEnabled(read: (key: string) => string | null): boolean {
+  try {
+    return read('multicc.dedup') === 'on'
+  } catch {
+    return false
+  }
+}
 
 /**
  * 提取一段数据中"最后一个"光标显隐控制码（DECTCEM）。

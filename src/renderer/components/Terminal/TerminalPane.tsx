@@ -7,7 +7,8 @@ import { WebglAddon } from 'xterm-addon-webgl'
 import 'xterm/css/xterm.css'
 import { TerminalInstance } from '../../App'
 import { getXTermTheme } from '../../hooks/useTheme'
-import { ScrollbackDeduplicator, lastCursorVisibility, containsStatefulSequences } from '../../utils/ScrollbackDeduplicator'
+import { ScrollbackDeduplicator, lastCursorVisibility, containsStatefulSequences, isDedupEnabled } from '../../utils/ScrollbackDeduplicator'
+import { getWindowsPtyOptions } from '../../utils/xtermWindowsPty'
 import { formatCwd } from '../../utils/formatCwd'
 import { statusDotClass } from '../../utils/statusDotClass'
 import { normalizePath } from '@shared/utils/path'
@@ -43,19 +44,6 @@ function getScrollback(): number {
     // localStorage 不可用时回退默认值
   }
   return DEFAULT_SCROLLBACK
-}
-
-// 去重开关（A/B 排查用）。ScrollbackDeduplicator 通过"整块丢弃重复写入"抑制经典渲染器
-// 把旧帧推进 scrollback 造成的镜像重复；但整块丢弃会连带丢掉块内的光标移动/显隐控制码，
-// 怀疑会造成光标错位（如 ↑ 调历史命令显示位置跑到上面）等渲染异常。
-// 默认开启；在 DevTools Console 执行 localStorage.setItem('multicc.dedup','off') 后重建终端即可关闭，
-// 用于验证某渲染异常是否由去重导致。
-function getDedupEnabled(): boolean {
-  try {
-    return localStorage.getItem('multicc.dedup') !== 'off'
-  } catch {
-    return true
-  }
 }
 
 // 从 cwd 路径检测 worktree 项目信息
@@ -121,6 +109,13 @@ export function TerminalPane({
       scrollback: getScrollback(),   // 可配置（默认 5000），防止无限累积 + 控制多终端内存
       fastScrollModifier: 'alt',
       fastScrollSensitivity: 5,
+      // ConPTY 适配（根治 resize 后"内容重复+排版错乱"）：ConPTY 每次 resize 后按
+      // 自己的模型全量重印视口，而 xterm 默认按 Unix 语义把 scrollback 旧行拉回视口，
+      // 重印落在拉回的旧行上 → 一份乱版 + 一份重印副本。windowsPty 让 xterm 走
+      // ConPTY 分支（行数变多时补空行），重印变幂等。取证与参数依据见
+      // utils/xtermWindowsPty.ts；回归测试 tests/unit/xterm-windows-pty.test.ts。
+      // 主进程 conpty.dll 加载失败回退 winpty 时，create 返回后再切换（下方）。
+      windowsPty: getWindowsPtyOptions('conpty'),
     })
 
     // 配置右键菜单选项
@@ -163,8 +158,14 @@ export function TerminalPane({
     xtermRef.current = xterm
     fitAddonRef.current = fitAddon
 
-    // 延迟 fit，确保终端已完全渲染
+    // 整个 effect 的存活标记（rAF 回调 / 写入批处理 / IPC 回调统一检查）
+    let isDisposed = false
+
+    // 延迟到首帧：先 fit 再按 fit 后的实际尺寸创建 PTY。
+    // 旧实现同步创建 → PTY 一律 80×24 起步，紧跟一次 resize，白付一个
+    // ConPTY reflow+全量重印周期（日志实证 11/11 终端 create cols=80 rows=24）。
     requestAnimationFrame(() => {
+      if (isDisposed) return  // pane 已在首帧前卸载，勿创建孤儿 PTY
       // 容器不可见（尺寸为 0，如聚焦模式下新建的隐藏 pane）时跳过 fit，避免算出畸形 cols/rows
       const rect = container.getBoundingClientRect()
       if (rect.width > 0 && rect.height > 0) {
@@ -176,27 +177,35 @@ export function TerminalPane({
       }
       // 自动聚焦终端
       xterm.focus()
-    })
 
-    // 创建 PTY 进程
-    const { cols, rows } = xterm
-    window.electron.terminal.create(terminal.id, cols, rows, terminal.cwd).then(() => {
-      // worktree setup 命令：在新终端中自动执行（用户可见、可中断）。
-      // PTY 输入由管道缓冲，shell 就绪后即执行，无需等待提示符。
-      if (terminal.initialCommand) {
-        window.electron.terminal.write(terminal.id, terminal.initialCommand + '\r')
-      }
+      // 创建 PTY 进程（用 fit 后的实际尺寸；主进程会用同尺寸预热 ResizeGovernor，
+      // 使 fit 触发的同尺寸 resize 直接 skip，启动期零多余 resize）
+      const { cols, rows } = xterm
+      window.electron.terminal.create(terminal.id, cols, rows, terminal.cwd).then((result) => {
+        if (isDisposed) return
+        // conpty.dll 加载失败回退 winpty 时，xterm 的 ConPTY 适配参数要跟着后端走
+        // （winpty 下 xterm 须禁用 reflow，见 utils/xtermWindowsPty.ts）
+        if (result && result.ok && result.backend === 'winpty') {
+          xterm.options.windowsPty = getWindowsPtyOptions('winpty', result.osBuild)
+        }
+        // worktree setup 命令：在新终端中自动执行（用户可见、可中断）。
+        // PTY 输入由管道缓冲，shell 就绪后即执行，无需等待提示符。
+        if (terminal.initialCommand) {
+          window.electron.terminal.write(terminal.id, terminal.initialCommand + '\r')
+        }
+      })
     })
 
     // 监听终端数据（来自主进程）
     // 使用 requestAnimationFrame 批处理写入，防止重负载时渲染器被淹没
     let pendingData = ''
     let rafId = 0
-    let isDisposed = false
     // 纯保险阀：rAF 间隔仅 ~16ms，2MB/帧 ≈ 128MB/s 持续输出才会触发
     const MAX_WRITE_PER_FRAME = 2 * 1024 * 1024
     const deduplicator = new ScrollbackDeduplicator()
-    const dedupEnabled = getDedupEnabled()
+    // 去重默认禁用（2026-08-05 取证：现代栈已无镜像重复，仅存误杀合法重复输出的风险；
+    // 详见 ScrollbackDeduplicator.ts 头注释）。排查残留通道：localStorage 设 'multicc.dedup'='on'。
+    const dedupEnabled = isDedupEnabled((k) => localStorage.getItem(k))
     // 去重决策日志开关（A/B 排查用）：localStorage.setItem('multicc.deduplog','on')
     const dedupLogEnabled = localStorage.getItem('multicc.deduplog') === 'on'
 

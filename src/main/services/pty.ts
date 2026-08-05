@@ -2,6 +2,7 @@ import * as pty from '@lydell/node-pty'
 import { BrowserWindow, app } from 'electron'
 import { exec } from 'child_process'
 import * as fs from 'fs'
+import * as os from 'os'
 import * as path from 'path'
 import { promisify } from 'util'
 import {
@@ -17,6 +18,7 @@ import {
   type TerminalStatus
 } from './terminal/OscParser'
 import { detectForegroundProcessAsync } from './terminal/WindowsProcessDetector'
+import type { TerminalCreateResult } from '@shared/types/terminal.types'
 import { OutputRateMonitor } from './terminal/OutputRateMonitor'
 import { parsePromptCwd } from './terminal/PromptCwdParser'
 import { ResizeGovernor } from './terminal/ResizeGovernor'
@@ -344,7 +346,7 @@ export class PtyService {
     }
   }
 
-  create(id: string, cols: number, rows: number, cwd?: string): boolean {
+  create(id: string, cols: number, rows: number, cwd?: string): TerminalCreateResult {
     try {
       const shell = process.env.COMSPEC || 'cmd.exe'
       // 确保 workingDir 是有效字符串
@@ -376,6 +378,8 @@ export class PtyService {
         }
       }
       let ptyProcess: pty.IPty
+      // 实际生效的后端——渲染端 xterm 的 windowsPty 适配参数要跟着它走
+      let backend: 'conpty' | 'winpty' = 'conpty'
       try {
         // useConptyDll: 使用 node-pty 自带的新 conpty.dll，而非 Windows 内置的老 conpty。
         // Win10(如 19045)内置 conpty 在重排「TUI 光标寻址 + CJK 宽字符」时会插入多余 \x08 退格，
@@ -389,6 +393,7 @@ export class PtyService {
         const msg = conptyErr instanceof Error ? conptyErr.message : String(conptyErr)
         console.warn('[PTY] ConPTY failed, falling back to winpty:', msg)
         ptyProcess = pty.spawn(shell, [], { ...baseOptions, useConpty: false })
+        backend = 'winpty'
         console.log('[PTY] Backend: winpty (16-color fallback)')
       }
 
@@ -404,7 +409,11 @@ export class PtyService {
       this.rateMonitors.set(id, rateMonitor)
 
       // Create resize governor for this terminal
-      this.resizeGovernors.set(id, new ResizeGovernor())
+      const resizeGovernor = new ResizeGovernor()
+      // 用创建尺寸预热：渲染端 fit 后创建 PTY，随后 xterm.onResize 会补发同尺寸
+      // resize——预热让它直接 skip，省掉启动期一次多余的 ConPTY reflow+全量重印
+      resizeGovernor.recordApply(cols, rows, Date.now(), 0)
+      this.resizeGovernors.set(id, resizeGovernor)
 
       // 监听输出 — 自适应处理
       ptyProcess.onData((data: string) => {
@@ -509,11 +518,18 @@ export class PtyService {
 
       console.log('[PTY] Total instances:', this.instances.size)
 
-      return true
+      // osBuild：winpty 回退时渲染端 xterm 需要宿主 OS build 号（winpty 语义跟随系统）
+      return { ok: true, backend, osBuild: PtyService.getOsBuildNumber() }
     } catch (error) {
       console.error('[PTY] Failed to create:', error)
-      return false
+      return { ok: false }
     }
+  }
+
+  /** 宿主 OS build 号（如 "10.0.19045" → 19045）；解析失败回退 Win10 基线 */
+  private static getOsBuildNumber(): number {
+    const build = Number(os.release().split('.')[2])
+    return Number.isFinite(build) ? build : 19045
   }
 
   /**
